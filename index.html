@@ -4,54 +4,65 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Expenses">
+  <meta name="theme-color" content="#0D0D12">
   <title>Expenses</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; }
-    body { background: #F4F3EF; font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif; }
-    input, button { outline: none; -webkit-appearance: none; font-family: inherit; }
     :root {
-      --p1: #1D4ED8;
-      --p2: #7C3AED;
-      --bg: #F4F3EF;
-      --card: #FFFFFF;
-      --text: #1C1C1E;
-      --muted: #8E8E93;
-      --border: #E5E3DF;
-      --green: #15803D;
-      --amber: #B45309;
-      --red: #991B1B;
+      --bg:     #0D0D12;
+      --surf:   #15151C;
+      --surf2:  #1C1C26;
+      --border: #252535;
+      --text:   #EDEDF2;
+      --muted:  #5A5A72;
+      --p1:     #5B96FF;
+      --p2:     #B06AFF;
+      --green:  #2ECFA0;
+      --amber:  #FFB830;
+      --red:    #FF5E6B;
     }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; background: var(--bg); }
+    body { font-family: system-ui, -apple-system, sans-serif; color: var(--text); }
+    input, button { font-family: inherit; outline: none; -webkit-appearance: none; }
+    input::placeholder { color: #2E2E42; }
+    ::-webkit-scrollbar { display: none; }
+
     @keyframes spin    { to { transform: rotate(360deg); } }
-    @keyframes fadeup  { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+    @keyframes fadeup  { from { opacity:0;transform:translateY(-8px); } to { opacity:1;transform:translateY(0); } }
     @keyframes slidein { from { transform:translateY(100%); } to { transform:translateY(0); } }
-    @keyframes bar     { 0%,100%{opacity:.6} 50%{opacity:1} }
-    .row:last-child      { border-bottom: none !important; }
-    .sugg-row:last-child { border-bottom: none !important; }
-    .sugg-row:active { background: var(--bg) !important; }
-    .btn-name:active { transform: scale(.97); }
-    .add-btn:active  { transform: scale(.98); }
-    .tab-btn:active  { opacity: .7; }
+    @keyframes pulse   { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+    .row:last-child       { border-bottom: none !important; }
+    .sugg-row:last-child  { border-bottom: none !important; }
+    .sugg-row:active      { background: var(--surf2) !important; }
+    .cat-btn:active       { transform: scale(.93); }
+    .btn-name:active      { transform: scale(.97); }
+    .add-btn:active       { transform: scale(.98); }
+    .tab-btn:active       { opacity: .5; }
+    .budget-row:active    { background: var(--surf2) !important; }
+
+    /* Initial loading state before React mounts */
+    #boot { display:flex; justify-content:center; align-items:center; height:100vh; }
+    #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #252535;border-top-color:#5B96FF;animation:spin .7s linear infinite; }
   </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root"><div id="boot"><div class="sp"></div></div></div>
 
-<!-- Firebase (compat SDK — no build step needed) -->
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
-
-<!-- React -->
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-<script>
-// ================================================================
-//  STEP 1 — Paste your Firebase config here.
-//  Get it from: Firebase Console → Project Settings → Your Apps → </> 
-// ================================================================
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+// ═══════════════════════════════════════════════════════════════
+//  CONFIG  — your Firebase credentials
+// ═══════════════════════════════════════════════════════════════
 const FIREBASE_CONFIG = {
   apiKey:            "AIzaSyDSnrvUcXuOvF3f4uR4RLNt_ZunntQaFBA",
   authDomain:        "nick-puai-expenses.firebaseapp.com",
@@ -61,444 +72,634 @@ const FIREBASE_CONFIG = {
   messagingSenderId: "610510764626",
   appId:             "1:610510764626:web:0b15a873a383667be33d8b"
 };
-// ================================================================
-
-// ================================================================
-//  STEP 2 — Set your names (optional — can also change in the app).
-// ================================================================
 const DEFAULT_NAMES = { p1: "Nick", p2: "Puai" };
-// ================================================================
 
-const IS_CONFIGURED = !Object.values(FIREBASE_CONFIG).some(v => String(v).startsWith("YOUR_"));
+firebase.initializeApp(FIREBASE_CONFIG);
+const db = firebase.database();
 
-let db = null;
-if (IS_CONFIGURED) {
-  firebase.initializeApp(FIREBASE_CONFIG);
-  db = firebase.database();
-}
+// ═══════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════════
+const CATS = [
+  { id:"groceries",     label:"Groceries",    emoji:"🛒", color:"#34D399" },
+  { id:"dining_fun",    label:"Dining & Fun", emoji:"🎉", color:"#FB923C" },
+  { id:"utilities",     label:"Utilities",    emoji:"⚡", color:"#60A5FA" },
+  { id:"insurance",     label:"Insurance",    emoji:"🛡️", color:"#FBBF24" },
+  { id:"subscriptions", label:"Subs",         emoji:"📱", color:"#F472B6" },
+  { id:"other",         label:"Other",        emoji:"🏷️", color:"#94A3B8" },
+];
+const FREQS = [
+  { id:"once",    label:"One-off"   },
+  { id:"weekly",  label:"↻ Weekly"  },
+  { id:"monthly", label:"↻ Monthly" },
+];
+const catById = id => {
+  // Migrate old IDs → new combined/removed categories
+  if (id === "dining" || id === "entertainment") return CATS.find(c => c.id === "dining_fun");
+  if (id === "transport" || id === "health" || id === "shopping") return CATS.find(c => c.id === "other");
+  return CATS.find(c => c.id === id) || CATS[CATS.length - 1];
+};
 
-// ── Helpers ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════════════
 const weekOf = (d = new Date()) => {
-  const dt = new Date(d);
-  dt.setHours(0, 0, 0, 0);
-  dt.setDate(dt.getDate() - ((dt.getDay() - 4 + 7) % 7)); // Thursday start
+  const dt = new Date(d); dt.setHours(0,0,0,0);
+  dt.setDate(dt.getDate() - ((dt.getDay()-4+7)%7));
   return dt.toISOString();
 };
-const nzd = n =>
-  new Intl.NumberFormat("en-NZ", { style: "currency", currency: "NZD" }).format(Math.abs(n));
-const shortDate = iso =>
-  new Date(iso).toLocaleDateString("en-NZ", { weekday: "short", month: "short", day: "numeric" });
-const longDate = iso =>
-  new Date(iso).toLocaleDateString("en-NZ", { weekday: "long", day: "numeric", month: "long" });
-const getBal = exps =>
-  exps.reduce((a, e) => a + (e.by === "p1" ? e.amt / 2 : -e.amt / 2), 0);
+const curMo   = () => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; };
+const prevMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===1?`${y-1}-12`:`${y}-${String(mo-1).padStart(2,"0")}`; };
+const nextMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===12?`${y+1}-01`:`${y}-${String(mo+1).padStart(2,"0")}`; };
+const moLabel = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,mo-1,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"}); };
+const moExps  = (exps,m) => exps.filter(e => e.ts && e.ts.startsWith(m));
 
-// ── React ──────────────────────────────────────────────────────
-const { useState, useEffect, useCallback, useRef, useMemo } = React;
-const h = React.createElement;
+const nzd       = n   => new Intl.NumberFormat("en-NZ",{style:"currency",currency:"NZD"}).format(Math.abs(n));
+const shortDate = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"short",month:"short",day:"numeric"});
+const longDate  = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long"});
+const getBal    = exps => exps.reduce((a,e) => a+(e.by==="p1"?e.amt/2:-e.amt/2), 0);
 
-// ── Setup screen (shown when Firebase isn't configured) ────────
-function SetupScreen() {
-  return h("div", { style: { padding: "40px 24px", maxWidth: 430, margin: "0 auto" } },
-    h("div", { style: { fontSize: 40, marginBottom: 16 } }, "⚙️"),
-    h("div", { style: { fontSize: 24, fontWeight: 800, marginBottom: 10, color: "var(--text)" } }, "Setup required"),
-    h("div", { style: { fontSize: 15, color: "var(--muted)", lineHeight: 1.6, marginBottom: 28 } },
-      "Open ", h("code", { style: c.code }, "index.html"),
-      " and follow the steps in ", h("code", { style: c.code }, "README.md"), " to connect Firebase."
-    ),
-    ...[
-      ["1", "Create a free Firebase project at firebase.google.com"],
-      ["2", "Enable Realtime Database → start in test mode"],
-      ["3", "Go to Project Settings → Your apps → copy the config"],
-      ["4", "Paste the config into index.html (clearly marked at the top)"],
-      ["5", "Push to GitHub, enable Pages, and you're live!"],
-    ].map(([n, txt]) =>
-      h("div", { key: n, style: { display: "flex", gap: 14, marginBottom: 16, alignItems: "flex-start" } },
-        h("div", { style: { width: 28, height: 28, borderRadius: 14, background: "var(--p1)", color: "#fff", fontSize: 13, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } }, n),
-        h("div", { style: { fontSize: 14, color: "var(--text)", lineHeight: 1.6, paddingTop: 5 } }, txt)
-      )
-    )
-  );
-}
+const pct = (spent, budget) => budget > 0 ? Math.min(Math.round((spent/budget)*100), 100) : 0;
+const barColor = p => p >= 100 ? "var(--red)" : p >= 80 ? "var(--amber)" : "var(--green)";
 
-// ── Shared style constants ─────────────────────────────────────
-const c = {
-  card:  { background: "var(--card)", borderRadius: 20, border: "1.5px solid var(--border)" },
-  label: { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10, display: "block" },
-  code:  { background: "#E8E6E0", borderRadius: 4, padding: "1px 6px", fontSize: 13 },
-};
-
-// ── Main App ───────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+//  APP
+// ═══════════════════════════════════════════════════════════════
 function App() {
-  const [tab,        setTab]        = useState("add");
-  const [exps,       setExps]       = useState([]);
-  const [names,      setNames]      = useState(DEFAULT_NAMES);
-  const [loading,    setLoading]    = useState(true);
-  const [syncing,    setSyncing]    = useState(false);
-  const [offline,    setOffline]    = useState(false);
-  const [by,         setBy]         = useState(null);
-  const [amt,        setAmt]        = useState("");
-  const [where,      setWhere]      = useState("");
-  const [whereFocus, setWhereFocus] = useState(false);
-  const [toast,      setToast]      = useState(null);
-  const [sheet,      setSheet]      = useState(false);
-  const [draftName,  setDraftName]  = useState("");
-  const [deleteId,   setDeleteId]   = useState(null);
+  // ── Data ────────────────────────────────────────────────────
+  const [exps,     setExps]     = useState([]);
+  const [names,    setNames]    = useState(DEFAULT_NAMES);
+  const [budgets,  setBudgets]  = useState({});
+  const [loading,  setLoading]  = useState(true);
+  const [syncing,  setSyncing]  = useState(false);
+
+  // ── Nav ─────────────────────────────────────────────────────
+  const [tab,      setTab]      = useState("add");
+  const [budgetMo, setBudgetMo] = useState(curMo());
+
+  // ── Add form ────────────────────────────────────────────────
+  const [by,    setBy]    = useState(null);
+  const [amt,   setAmt]   = useState("");
+  const [cat,   setCat]   = useState(null);
+  const [where, setWhere] = useState("");
+  const [freq,  setFreq]  = useState("once");
+  const [wFocus,setWFocus]= useState(false);
+
+  // ── UI ──────────────────────────────────────────────────────
+  const [toast,       setToast]       = useState(null);
+  const [modal,       setModal]       = useState(null); // {type, id?, catId?}
+  const [draftNames,  setDraftNames]  = useState({p1:"",p2:""});
+  const [draftBudget, setDraftBudget] = useState("");
+
   const amtRef   = useRef(null);
   const whereRef = useRef(null);
 
-  // Real-time Firebase listener
+  // ── Firebase ─────────────────────────────────────────────────
   useEffect(() => {
-    if (!db) return;
     const ref = db.ref("/tracker");
-    ref.on("value", snapshot => {
-      const data = snapshot.val() || {};
-      // Sort newest-first on load
-      const loaded = (data.expenses || []).sort((a, b) => b.ts.localeCompare(a.ts));
-      setExps(loaded);
-      if (data.names) setNames(data.names);
-      setLoading(false);
-      setSyncing(false);
-      setOffline(false);
-    }, () => {
-      setLoading(false);
-      setOffline(true);
-    });
+    ref.on("value", snap => {
+      const d = snap.val() || {};
+      setExps((d.expenses||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
+      if (d.names)   setNames(d.names);
+      if (d.budgets) setBudgets(d.budgets);
+      setLoading(false); setSyncing(false);
+    }, () => setLoading(false));
     return () => ref.off();
   }, []);
 
-  const persist = useCallback(async (newExps, newNames) => {
-    if (!db) return;
+  const persist = useCallback(async (e, n, b) => {
     setSyncing(true);
-    try {
-      await db.ref("/tracker").set({ expenses: newExps, names: newNames });
-    } catch {
-      showToast("Couldn't save — check your connection", true);
-      setSyncing(false);
-    }
+    try { await db.ref("/tracker").set({ expenses:e, names:n, budgets:b }); }
+    catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
   }, []);
 
-  const showToast = (msg, err = false) => {
-    setToast({ msg, err });
-    setTimeout(() => setToast(null), 2400);
-  };
+  const toast_ = (msg, err=false) => { setToast({msg,err}); setTimeout(()=>setToast(null),2400); };
 
-  // Autocomplete: places sorted by frequency
-  const suggestions = useMemo(() => {
-    const freq = {};
-    exps.forEach(e => {
-      if (e.where && e.where !== "Unspecified")
-        freq[e.where] = (freq[e.where] || 0) + 1;
-    });
-    return Object.entries(freq)
-      .sort((a, b) => b[1] - a[1])
-      .map(([place, count]) => ({ place, count }));
+  // ── Autocomplete ─────────────────────────────────────────────
+  const suggs = useMemo(() => {
+    const f={};
+    exps.forEach(e=>{ if(e.where&&e.where!=="Unspecified") f[e.where]=(f[e.where]||0)+1; });
+    return Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([place,count])=>({place,count}));
   }, [exps]);
 
-  const filteredSuggs = useMemo(() => {
-    if (!whereFocus) return [];
-    if (!where.trim()) return suggestions.slice(0, 6);
+  const filtSuggs = useMemo(() => {
+    if (!wFocus) return [];
+    if (!where.trim()) return suggs.slice(0,5);
     const q = where.toLowerCase();
-    return suggestions
-      .filter(s => s.place.toLowerCase().includes(q) && s.place.toLowerCase() !== q)
-      .slice(0, 6);
-  }, [where, whereFocus, suggestions]);
+    return suggs.filter(s=>s.place.toLowerCase().includes(q)&&s.place.toLowerCase()!==q).slice(0,5);
+  }, [where, wFocus, suggs]);
 
-  // Derived data
+  // ── Derived ──────────────────────────────────────────────────
   const thisW     = weekOf();
-  const lastW     = weekOf(new Date(Date.now() - 7 * 86400000));
-  const isThur    = new Date().getDay() === 4;
-  const thisWExps = exps.filter(e => e.week === thisW);
-  const lastWExps = exps.filter(e => e.week === lastW);
+  const lastW     = weekOf(new Date(Date.now()-7*86400000));
+  const isThur    = new Date().getDay()===4;
+  const thisWExps = exps.filter(e=>e.week===thisW);
+  const lastWExps = exps.filter(e=>e.week===lastW);
+  const bmoExps   = moExps(exps, budgetMo);
   const totalBal  = getBal(exps);
   const weekBal   = getBal(thisWExps);
   const lastBal   = getBal(lastWExps);
-  const aC        = by === "p1" ? "var(--p1)" : by === "p2" ? "var(--p2)" : "var(--text)";
-  const aHex      = by === "p1" ? "#1D4ED8"   : by === "p2" ? "#7C3AED"   : "#1C1C1E";
+
+  const aC   = by==="p1"?"var(--p1)":by==="p2"?"var(--p2)":"var(--text)";
+  const aHex = by==="p1"?"#5B96FF":by==="p2"?"#B06AFF":"#EDEDF2";
 
   const balLabel = b => {
-    if (Math.abs(b) < 0.01) return "All square ✓";
-    const debtor  = b > 0 ? names.p2 : names.p1;
-    const creditor = b > 0 ? names.p1 : names.p2;
-    return `${debtor} owes ${creditor}`;
+    if (Math.abs(b)<0.01) return "All square ✓";
+    return `${b>0?names.p2:names.p1} owes ${b>0?names.p1:names.p2}`;
   };
 
-  // Actions
+  const catTotals = expList => {
+    const t={};
+    expList.forEach(e=>{ const c=e.category||"other"; t[c]=(t[c]||0)+e.amt; });
+    return CATS.filter(c=>t[c.id]).map(c=>({...c,total:t[c.id]})).sort((a,b)=>b.total-a.total);
+  };
+
+  const recurringItems = useMemo(()=>{
+    const seen={};
+    exps.filter(e=>e.frequency&&e.frequency!=="once").forEach(e=>{
+      const k=`${e.category||"other"}|${e.where}|${e.frequency}`;
+      if(!seen[k]||e.ts>seen[k].ts) seen[k]=e;
+    });
+    return Object.values(seen).map(e=>({
+      ...e, monthlyAmt:e.frequency==="weekly"?e.amt*(52/12):e.amt
+    })).sort((a,b)=>b.monthlyAmt-a.monthlyAmt);
+  },[exps]);
+
+  // ── Actions ──────────────────────────────────────────────────
   async function addExp() {
-    if (!by) return showToast("Tap who paid first", true);
-    const v = parseFloat(amt);
-    if (!v || v <= 0) return showToast("Enter a valid amount", true);
-    const exp = {
-      id:    String(Date.now()),
-      ts:    new Date().toISOString(),
-      amt:   v,
-      where: where.trim() || "Unspecified",
-      by,
-      week:  thisW,
-    };
-    const ne = [exp, ...exps];
-    setAmt(""); setWhere(""); setWhereFocus(false);
-    showToast(`${nzd(v)} added ✓`);
-    await persist(ne, names);
+    if (!by) return toast_("Tap who paid first",true);
+    const v=parseFloat(amt);
+    if (!v||v<=0) return toast_("Enter a valid amount",true);
+    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq};
+    const ne=[exp,...exps];
+    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setWFocus(false);
+    toast_(`${nzd(v)} added ✓`);
+    await persist(ne,names,budgets);
   }
-
   async function delExp(id) {
-    const ne = exps.filter(e => e.id !== id);
-    setDeleteId(null);
-    await persist(ne, names);
+    const ne=exps.filter(e=>e.id!==id); setModal(null);
+    await persist(ne,names,budgets);
   }
-
   async function saveName() {
-    const nn = { ...names, p2: draftName.trim() || names.p2 };
-    setSheet(false);
-    showToast("Name saved ✓");
-    await persist(exps, nn);
+    const nn={p1:draftNames.p1.trim()||names.p1, p2:draftNames.p2.trim()||names.p2};
+    setModal(null); toast_("Names saved ✓");
+    await persist(exps,nn,budgets);
+  }
+  async function saveBudget(catId) {
+    const v=parseFloat(draftBudget);
+    if(!v||v<=0){setModal(null);return;}
+    const nb={...budgets,[catId]:v}; setBudgets(nb); setModal(null); toast_("Budget saved ✓");
+    await persist(exps,names,nb);
   }
 
-  const selectSugg = place => {
-    setWhere(place);
-    setWhereFocus(false);
-    whereRef.current?.blur();
+  // ── Shared style values ──────────────────────────────────────
+  const S = {
+    card:  {background:"var(--surf)",borderRadius:20,border:"1.5px solid var(--border)"},
+    lbl:   {fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10,display:"block"},
+    page:  {padding:"28px 20px 0"},
+    title: {fontSize:27,fontWeight:800,letterSpacing:"-0.7px",color:"var(--text)",marginBottom:4},
   };
 
-  // ── Loading ────────────────────────────────────────────────
-  if (loading) return h("div", { style: { display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", background: "var(--bg)" } },
-    h("div", { style: { width: 28, height: 28, borderRadius: 14, border: "3px solid var(--border)", borderTopColor: "var(--p1)", animation: "spin .7s linear infinite" } })
+  if (loading) return (
+    <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
+      <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
+    </div>
   );
 
-  // ── Render ─────────────────────────────────────────────────
-  return h("div", { style: { background: "var(--bg)", minHeight: "100vh", maxWidth: 430, margin: "0 auto", paddingBottom: 90 } },
+  // ════════════════════════════════════════════════════════════
+  return (
+    <div style={{background:"var(--bg)",minHeight:"100vh",maxWidth:430,margin:"0 auto",paddingBottom:90}}>
 
-    // Sync bar
-    syncing && h("div", { style: { position: "fixed", top: 0, left: 0, right: 0, height: 3, background: "var(--p1)", zIndex: 9999, animation: "bar 1.2s ease infinite" } }),
+      {/* Sync bar */}
+      {syncing && <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"var(--p1)",zIndex:9999,animation:"pulse 1.4s ease infinite"}}/>}
 
-    // Offline banner
-    offline && h("div", { style: { background: "#FEF3C7", borderBottom: "1px solid #FDE68A", padding: "10px 20px", fontSize: 13, fontWeight: 600, color: "#92400E", textAlign: "center" } },
-      "⚠️ No connection — changes may not save"
-    ),
+      {/* Toast */}
+      {toast && <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:toast.err?"var(--red)":"#1A1A2E",color:"#fff",borderRadius:99,padding:"11px 22px",fontSize:14,fontWeight:600,zIndex:9999,animation:"fadeup .2s ease",whiteSpace:"nowrap",boxShadow:"0 8px 30px rgba(0,0,0,.4)",pointerEvents:"none"}}>{toast.msg}</div>}
 
-    // Toast
-    toast && h("div", { style: { position: "fixed", top: 20, left: "50%", transform: "translateX(-50%)", background: toast.err ? "var(--red)" : "#111827", color: "#fff", borderRadius: 99, padding: "11px 22px", fontSize: 14, fontWeight: 600, zIndex: 9999, animation: "fadeup .2s ease", whiteSpace: "nowrap", boxShadow: "0 8px 30px rgba(0,0,0,.25)", pointerEvents: "none" } }, toast.msg),
+      {/* ── MODAL: Delete ── */}
+      {modal?.type==="delete" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"20px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 20px"}}/>
+            <div style={{fontSize:18,fontWeight:700,marginBottom:6}}>Delete this entry?</div>
+            <div style={{fontSize:14,color:"var(--muted)",marginBottom:24}}>This can't be undone.</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <button onClick={()=>setModal(null)} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer",color:"var(--text)"}}>Cancel</button>
+              <button onClick={()=>delExp(modal.id)} style={{padding:16,background:"var(--red)",color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer"}}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-    // Delete confirm sheet
-    deleteId && h("div", { onClick: () => setDeleteId(null), style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 500, display: "flex", alignItems: "flex-end" } },
-      h("div", { onClick: e => e.stopPropagation(), style: { background: "var(--card)", width: "100%", maxWidth: 430, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "20px 24px 48px", animation: "slidein .25s ease" } },
-        h("div", { style: { width: 36, height: 4, background: "var(--border)", borderRadius: 2, margin: "0 auto 20px" } }),
-        h("div", { style: { fontSize: 18, fontWeight: 700, marginBottom: 6 } }, "Delete this entry?"),
-        h("div", { style: { fontSize: 14, color: "var(--muted)", marginBottom: 24 } }, "This can't be undone."),
-        h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
-          h("button", { onClick: () => setDeleteId(null), style: { padding: 16, background: "var(--bg)", border: "none", borderRadius: 16, fontSize: 16, fontWeight: 600, cursor: "pointer" } }, "Cancel"),
-          h("button", { onClick: () => delExp(deleteId), style: { padding: 16, background: "var(--red)", color: "#fff", border: "none", borderRadius: 16, fontSize: 16, fontWeight: 600, cursor: "pointer" } }, "Delete")
-        )
-      )
-    ),
+      {/* ── MODAL: Settings (partner name) ── */}
+      {modal?.type==="settings" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 28px"}}/>
+            <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Edit names</div>
+            <div style={{fontSize:14,color:"var(--muted)",marginBottom:22,lineHeight:1.5}}>Change the names shown on buttons and summaries.</div>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Your name</div>
+            <input value={draftNames.p1} onChange={e=>setDraftNames({...draftNames,p1:e.target.value})} placeholder={names.p1} autoFocus
+              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:16,color:"var(--text)",background:"var(--surf2)"}}/>
+            <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Partner's name</div>
+            <input value={draftNames.p2} onChange={e=>setDraftNames({...draftNames,p2:e.target.value})} placeholder={names.p2}
+              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:20,color:"var(--text)",background:"var(--surf2)"}}/>
+            <button onClick={saveName} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Save names</button>
+          </div>
+        </div>
+      )}
 
-    // Settings sheet
-    sheet && h("div", { onClick: () => setSheet(false), style: { position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 500, display: "flex", alignItems: "flex-end" } },
-      h("div", { onClick: e => e.stopPropagation(), style: { background: "var(--card)", width: "100%", maxWidth: 430, margin: "0 auto", borderRadius: "24px 24px 0 0", padding: "16px 24px 52px", animation: "slidein .25s ease" } },
-        h("div", { style: { width: 36, height: 4, background: "var(--border)", borderRadius: 2, margin: "0 auto 28px" } }),
-        h("div", { style: { fontSize: 22, fontWeight: 800, marginBottom: 8 } }, "Partner's name"),
-        h("div", { style: { fontSize: 15, color: "var(--muted)", marginBottom: 24, lineHeight: 1.5 } }, "Change the name shown on buttons and summaries."),
-        h("input", { value: draftName, onChange: e => setDraftName(e.target.value), placeholder: names.p2, autoFocus: true, style: { width: "100%", border: "2px solid var(--border)", borderRadius: 16, padding: "16px 18px", fontSize: 18, marginBottom: 18, color: "var(--text)", background: "var(--bg)" } }),
-        h("button", { onClick: saveName, style: { width: "100%", background: "var(--p2)", color: "#fff", border: "none", borderRadius: 18, padding: "18px 0", fontSize: 18, fontWeight: 800, cursor: "pointer" } }, "Save name")
-      )
-    ),
+      {/* ── MODAL: Set budget ── */}
+      {modal?.type==="budget" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
+            {(() => { const c=catById(modal.catId); return (<>
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+                <div style={{width:44,height:44,borderRadius:14,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{c.emoji}</div>
+                <div>
+                  <div style={{fontSize:20,fontWeight:800}}>{c.label}</div>
+                  <div style={{fontSize:13,color:"var(--muted)"}}>Monthly budget</div>
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:18,border:"2px solid var(--border)"}}>
+                <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
+                <input type="text" inputMode="decimal" placeholder="0.00" value={draftBudget} onChange={e=>setDraftBudget(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
+                  style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer",gridColumn:budgets[modal.catId]?"auto":"1/-1"}}>Save budget</button>
+              </div>
+            </>); })()}
+          </div>
+        </div>
+      )}
 
-    // ═══════════════════════════════════════════
-    //  ADD TAB
-    // ═══════════════════════════════════════════
-    tab === "add" && h("div", { style: { padding: "28px 20px 0" } },
+      {/* ══════════════════════════════════════════════════════
+          ADD TAB
+      ══════════════════════════════════════════════════════ */}
+      {tab==="add" && (
+        <div style={S.page}>
+          {/* Header */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
+            <div>
+              <div style={S.title}>Add expense</div>
+              <div style={{fontSize:14,color:"var(--muted)"}}>{longDate(new Date().toISOString())}</div>
+            </div>
+            <button onClick={()=>{setDraftNames({p1:names.p1,p2:names.p2});setModal({type:"settings"});}} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 0 4px 12px",color:"var(--muted)"}}>
+              <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx={12} cy={12} r={3}/>
+                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </button>
+          </div>
 
-      // Header
-      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 } },
-        h("div", null,
-          h("div", { style: { fontSize: 27, fontWeight: 800, letterSpacing: "-0.7px", color: "var(--text)" } }, "Add expense"),
-          h("div", { style: { fontSize: 14, color: "var(--muted)", marginTop: 3 } }, longDate(new Date().toISOString()))
-        ),
-        h("button", { onClick: () => { setDraftName(names.p2); setSheet(true); }, style: { background: "none", border: "none", cursor: "pointer", padding: "4px 0 4px 12px", color: "var(--muted)" } },
-          h("svg", { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" },
-            h("circle", { cx: 12, cy: 12, r: 3 }),
-            h("path", { d: "M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" })
-          )
-        )
-      ),
+          {/* Balance pill */}
+          <div style={{background:Math.abs(totalBal)<0.01?"#0D2A1E":"#1F1A0A",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#1A4D33":"#3D3010"}`,borderRadius:16,padding:"14px 18px",marginBottom:26,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:13,fontWeight:600,color:Math.abs(totalBal)<0.01?"#2ECFA0":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"All square":"Running total — "+balLabel(totalBal)}</div>
+            <div style={{fontSize:20,fontWeight:800,color:Math.abs(totalBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"✓":nzd(totalBal)}</div>
+          </div>
 
-      // Balance pill
-      h("div", { style: { background: Math.abs(totalBal) < 0.01 ? "#F0FDF4" : "#FFFBEB", border: `1.5px solid ${Math.abs(totalBal) < 0.01 ? "#BBF7D0" : "#FDE68A"}`, borderRadius: 16, padding: "14px 18px", marginBottom: 26, display: "flex", justifyContent: "space-between", alignItems: "center" } },
-        h("div", { style: { fontSize: 13, fontWeight: 600, color: Math.abs(totalBal) < 0.01 ? "#166534" : "#78350F" } },
-          Math.abs(totalBal) < 0.01 ? "Running total" : balLabel(totalBal)
-        ),
-        h("div", { style: { fontSize: 20, fontWeight: 800, color: Math.abs(totalBal) < 0.01 ? "var(--green)" : "var(--amber)" } },
-          Math.abs(totalBal) < 0.01 ? "✓ All square" : nzd(totalBal)
-        )
-      ),
+          {/* Quick add — recurring items */}
+          {recurringItems.length>0 && (
+            <div style={{marginBottom:22}}>
+              <span style={S.lbl}>Quick add recurring</span>
+              <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4,marginRight:-20,paddingRight:20}}>
+                {recurringItems.map(e=>{
+                  const c=catById(e.category||"other");
+                  return (
+                    <button key={e.id} onClick={()=>{
+                      setBy(e.by); setCat(e.category||"other"); setWhere(e.where);
+                      setAmt(String(e.amt)); setFreq(e.frequency);
+                      setTimeout(()=>amtRef.current?.focus(),50);
+                    }}
+                      style={{flexShrink:0,background:"var(--surf)",border:`1.5px solid ${c.color}50`,borderRadius:14,padding:"10px 14px",cursor:"pointer",textAlign:"left",minWidth:120}}>
+                      <div style={{fontSize:15,marginBottom:3}}>{c.emoji}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:100}}>{e.where}</div>
+                      <div style={{fontSize:12,color:c.color,fontWeight:600,marginTop:1}}>{nzd(e.amt)}</div>
+                      <div style={{fontSize:10,color:"var(--muted)",marginTop:1}}>↻ {e.frequency} · {e.by==="p1"?names.p1:names.p2}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
-      // Who paid
-      h("span", { style: c.label }, "Who paid?"),
-      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 22 } },
-        [["p1", names.p1, "var(--p1)", "#1D4ED8"], ["p2", names.p2, "var(--p2)", "#7C3AED"]].map(([k, label, cv, hex]) =>
-          h("button", { key: k, className: "btn-name",
-            onClick: () => { setBy(k); setTimeout(() => amtRef.current?.focus(), 50); },
-            style: { padding: "22px 16px", background: by === k ? cv : "var(--card)", color: by === k ? "#fff" : "var(--text)", border: `2.5px solid ${by === k ? cv : "var(--border)"}`, borderRadius: 20, cursor: "pointer", fontSize: 22, fontWeight: 800, transition: "all .15s ease", boxShadow: by === k ? `0 6px 24px ${hex}45` : "none" }
-          }, label)
-        )
-      ),
+          {/* Who paid */}
+          <span style={S.lbl}>Who paid?</span>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:22}}>
+            {[["p1",names.p1,"var(--p1)","#5B96FF"],["p2",names.p2,"var(--p2)","#B06AFF"]].map(([k,label,cv,hex])=>(
+              <button key={k} className="btn-name" onClick={()=>{setBy(k);setTimeout(()=>amtRef.current?.focus(),50);}}
+                style={{padding:"22px 16px",background:by===k?cv:"var(--surf)",color:by===k?"#fff":"var(--text)",border:`2.5px solid ${by===k?cv:"var(--border)"}`,borderRadius:20,cursor:"pointer",fontSize:22,fontWeight:800,transition:"all .15s ease",boxShadow:by===k?`0 6px 28px ${hex}50`:"none"}}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-      // Amount
-      h("span", { style: c.label }, "Amount"),
-      h("div", { style: { ...c.card, padding: "14px 20px", marginBottom: 14, display: "flex", alignItems: "center", gap: 6, border: `2px solid ${amt ? aC : "var(--border)"}`, transition: "border-color .2s" } },
-        h("span", { style: { fontSize: 30, color: amt ? aC : "#D1D1D6", fontWeight: 300, lineHeight: 1, transition: "color .2s" } }, "$"),
-        h("input", {
-          ref: amtRef, type: "text", inputMode: "decimal", placeholder: "0.00", value: amt,
-          onChange: e => setAmt(e.target.value.replace(/[^0-9.]/g, "")),
-          style: { fontSize: 40, fontWeight: 800, border: "none", background: "none", width: "100%", letterSpacing: "-1.5px", color: amt ? (by ? aC : "var(--text)") : "#D1D1D6", transition: "color .2s" }
-        })
-      ),
+          {/* Amount */}
+          <span style={S.lbl}>Amount</span>
+          <div style={{...S.card,padding:"14px 20px",marginBottom:18,display:"flex",alignItems:"center",gap:6,border:`2px solid ${amt?aC:"var(--border)"}`,transition:"border-color .2s"}}>
+            <span style={{fontSize:30,color:amt?aC:"#2E2E42",fontWeight:300,lineHeight:1,transition:"color .2s"}}>$</span>
+            <input ref={amtRef} type="text" inputMode="decimal" placeholder="0.00" value={amt} onChange={e=>setAmt(e.target.value.replace(/[^0-9.]/g,""))}
+              style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#2E2E42",transition:"color .2s"}}/>
+          </div>
 
-      // Where (with autocomplete)
-      h("span", { style: c.label }, "Where? ", h("span", { style: { textTransform: "none", letterSpacing: 0, fontWeight: 400, fontSize: 11 } }, "(optional)")),
-      h("div", { style: { position: "relative", marginBottom: 26 } },
-        h("div", { style: { ...c.card, padding: "16px 20px", border: `2px solid ${where ? aC : whereFocus ? "#A0A0A8" : "var(--border)"}`, transition: "border-color .2s", borderRadius: whereFocus && filteredSuggs.length > 0 ? "20px 20px 0 0" : 20 } },
-          h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
-            suggestions.length > 0 && h("svg", { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: where ? aC : "var(--muted)", strokeWidth: 2, strokeLinecap: "round", flexShrink: 0 },
-              h("circle", { cx: 12, cy: 12, r: 9 }), h("polyline", { points: "12 7 12 12 15 15" })
-            ),
-            h("input", {
-              ref: whereRef, type: "text", value: where,
-              placeholder: suggestions.length > 0 ? "Tap to see recent places…" : "PAK'nSave, electricity…",
-              onChange: e => setWhere(e.target.value),
-              onFocus:  () => setWhereFocus(true),
-              onBlur:   () => setTimeout(() => setWhereFocus(false), 150),
-              style: { fontSize: 17, fontWeight: 500, border: "none", background: "none", width: "100%", color: where ? "var(--text)" : "#D1D1D6" }
-            })
-          )
-        ),
-        whereFocus && filteredSuggs.length > 0 && h("div", { style: { position: "absolute", top: "100%", left: 0, right: 0, background: "var(--card)", borderRadius: "0 0 20px 20px", border: "2px solid var(--border)", borderTop: "1px solid var(--border)", overflow: "hidden", zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,.08)" } },
-          filteredSuggs.map(({ place, count }) =>
-            h("button", { key: place, className: "sugg-row",
-              onMouseDown: e => e.preventDefault(),
-              onClick: () => selectSugg(place),
-              style: { display: "flex", alignItems: "center", gap: 12, width: "100%", padding: "13px 16px", background: "none", border: "none", borderBottom: "1px solid var(--border)", cursor: "pointer", textAlign: "left" }
-            },
-              h("div", { style: { width: 32, height: 32, borderRadius: 9, background: "#F4F3EF", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 } },
-                h("svg", { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "var(--muted)", strokeWidth: 2, strokeLinecap: "round" },
-                  h("circle", { cx: 12, cy: 12, r: 9 }), h("polyline", { points: "12 7 12 12 15 15" })
-                )
-              ),
-              h("span", { style: { fontSize: 15, fontWeight: 600, color: "var(--text)", flex: 1 } }, place),
-              count > 1 && h("span", { style: { fontSize: 12, color: "var(--muted)", background: "#F4F3EF", borderRadius: 99, padding: "3px 8px", fontWeight: 600 } }, `×${count}`)
-            )
-          )
-        )
-      ),
+          {/* Category grid */}
+          <span style={S.lbl}>Category</span>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
+            {CATS.map(c=>(
+              <button key={c.id} className="cat-btn" onClick={()=>setCat(cat===c.id?null:c.id)}
+                style={{padding:"10px 6px",background:cat===c.id?`${c.color}22`:"var(--surf)",border:`2px solid ${cat===c.id?c.color:"var(--border)"}`,borderRadius:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4,transition:"all .15s"}}>
+                <span style={{fontSize:18}}>{c.emoji}</span>
+                <span style={{fontSize:11,fontWeight:cat===c.id?700:500,color:cat===c.id?c.color:"var(--muted)",letterSpacing:"0.01em"}}>{c.label}</span>
+              </button>
+            ))}
+          </div>
 
-      // Submit
-      h("button", { className: "add-btn", onClick: addExp,
-        style: { width: "100%", background: by ? aC : "#1C1C1E", color: "#fff", border: "none", borderRadius: 20, padding: "20px 0", fontSize: 18, fontWeight: 800, cursor: "pointer", transition: "background .2s, box-shadow .2s", boxShadow: by ? `0 8px 32px ${aHex}50` : "none" }
-      }, "Add expense")
-    ),
+          {/* Where */}
+          <span style={S.lbl}>Where? <span style={{textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11}}>(optional)</span></span>
+          <div style={{position:"relative",marginBottom:18}}>
+            <div style={{...S.card,padding:"16px 20px",border:`2px solid ${where?aC:wFocus?"#44445A":"var(--border)"}`,transition:"border-color .2s",borderRadius:filtSuggs.length>0&&wFocus?"20px 20px 0 0":20}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                {suggs.length>0 && <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={where?aC:"var(--muted)"} strokeWidth={2} strokeLinecap="round" style={{flexShrink:0}}>
+                  <circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/>
+                </svg>}
+                <input ref={whereRef} type="text" placeholder={suggs.length>0?"Tap for recent places…":"PAK'nSave, power bill…"} value={where}
+                  onChange={e=>setWhere(e.target.value)} onFocus={()=>setWFocus(true)} onBlur={()=>setTimeout(()=>setWFocus(false),150)}
+                  style={{fontSize:17,fontWeight:500,border:"none",background:"none",width:"100%",color:where?"var(--text)":"#2E2E42"}}/>
+              </div>
+            </div>
+            {wFocus&&filtSuggs.length>0 && (
+              <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--surf)",borderRadius:"0 0 20px 20px",border:"2px solid var(--border)",borderTop:"1px solid var(--border)",overflow:"hidden",zIndex:50,boxShadow:"0 12px 32px rgba(0,0,0,.4)"}}>
+                {filtSuggs.map(({place,count})=>(
+                  <button key={place} className="sugg-row" onMouseDown={e=>e.preventDefault()} onClick={()=>{setWhere(place);setWFocus(false);whereRef.current?.blur();}}
+                    style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
+                    <div style={{width:32,height:32,borderRadius:9,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2} strokeLinecap="round">
+                        <circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/>
+                      </svg>
+                    </div>
+                    <span style={{fontSize:15,fontWeight:600,color:"var(--text)",flex:1}}>{place}</span>
+                    {count>1&&<span style={{fontSize:12,color:"var(--muted)",background:"var(--surf2)",borderRadius:99,padding:"3px 8px",fontWeight:600}}>×{count}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-    // ═══════════════════════════════════════════
-    //  WEEK TAB
-    // ═══════════════════════════════════════════
-    tab === "week" && h("div", { style: { padding: "28px 20px 0" } },
+          {/* Frequency */}
+          <span style={S.lbl}>Frequency</span>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:28}}>
+            {FREQS.map(f=>(
+              <button key={f.id} onClick={()=>setFreq(f.id)}
+                style={{padding:"12px 8px",background:freq===f.id?"var(--surf2)":"var(--surf)",border:`2px solid ${freq===f.id?"var(--p1)":"var(--border)"}`,borderRadius:14,cursor:"pointer",fontSize:13,fontWeight:freq===f.id?700:500,color:freq===f.id?"var(--p1)":"var(--muted)",transition:"all .15s"}}>
+                {f.label}
+              </button>
+            ))}
+          </div>
 
-      h("div", { style: { fontSize: 27, fontWeight: 800, letterSpacing: "-0.7px", marginBottom: 4 } }, "This week"),
-      h("div", { style: { fontSize: 14, color: "var(--muted)", marginBottom: 24 } },
-        shortDate(thisW), " — ", shortDate(new Date(new Date(thisW).getTime() + 6 * 86400000).toISOString())
-      ),
+          {/* Submit */}
+          <button className="add-btn" onClick={addExp}
+            style={{width:"100%",background:by?aC:"var(--surf2)",color:by?"#fff":"var(--muted)",border:"none",borderRadius:20,padding:"20px 0",fontSize:18,fontWeight:800,cursor:"pointer",transition:"background .2s,box-shadow .2s",boxShadow:by?`0 8px 32px ${aHex}50`:"none",marginBottom:8}}>
+            Add expense
+          </button>
+        </div>
+      )}
 
-      // Thursday: last week tally
-      isThur && lastWExps.length > 0 && h("div", { style: { background: "#EEF2FF", border: "1.5px solid #C7D2FE", borderRadius: 20, padding: "18px 20px", marginBottom: 14 } },
-        h("div", { style: { fontSize: 11, fontWeight: 700, color: "#4338CA", textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 10 } }, "📋 Last week — final tally"),
-        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
-          h("div", { style: { fontSize: 16, fontWeight: 700, color: "#3730A3" } }, Math.abs(lastBal) < 0.01 ? "All square — nothing owed ✓" : balLabel(lastBal)),
-          h("div", { style: { fontSize: 26, fontWeight: 800, color: "#4338CA" } }, Math.abs(lastBal) < 0.01 ? "✓" : nzd(lastBal))
-        ),
-        h("div", { style: { fontSize: 13, color: "#6366F1" } },
-          lastWExps.length, " purchases · Total spent ", nzd(lastWExps.reduce((a, e) => a + e.amt, 0))
-        )
-      ),
+      {/* ══════════════════════════════════════════════════════
+          WEEK TAB
+      ══════════════════════════════════════════════════════ */}
+      {tab==="week" && (
+        <div style={S.page}>
+          <div style={S.title}>This week</div>
+          <div style={{fontSize:14,color:"var(--muted)",marginBottom:24}}>
+            {shortDate(thisW)} — {shortDate(new Date(new Date(thisW).getTime()+6*86400000).toISOString())}
+          </div>
 
-      // This week summary card
-      h("div", { style: { ...c.card, padding: 20, marginBottom: 14 } },
-        h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 } },
-          [["p1", names.p1, "var(--p1)", "#1D4ED8"], ["p2", names.p2, "var(--p2)", "#7C3AED"]].map(([k, label, cv, hex]) => {
-            const paid = thisWExps.filter(e => e.by === k).reduce((a, e) => a + e.amt, 0);
-            return h("div", { key: k, style: { background: `${hex}12`, borderRadius: 14, padding: "14px 16px" } },
-              h("div", { style: { fontSize: 11, fontWeight: 700, color: cv, textTransform: "uppercase", letterSpacing: ".08em", marginBottom: 6 } }, label),
-              h("div", { style: { fontSize: 26, fontWeight: 800, color: cv } }, nzd(paid)),
-              h("div", { style: { fontSize: 12, color: "var(--muted)", marginTop: 2 } }, "paid this week")
+          {/* Thursday: last week tally */}
+          {isThur&&lastWExps.length>0 && (
+            <div style={{background:"#0F1035",border:"1.5px solid #2A2A6A",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#8888DD",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:16,fontWeight:700,color:"#AAAAEE"}}>{Math.abs(lastBal)<0.01?"All square ✓":balLabel(lastBal)}</div>
+                <div style={{fontSize:26,fontWeight:800,color:"#8888FF"}}>{Math.abs(lastBal)<0.01?"✓":nzd(lastBal)}</div>
+              </div>
+              <div style={{fontSize:13,color:"#6666BB"}}>{lastWExps.length} purchases · {nzd(lastWExps.reduce((a,e)=>a+e.amt,0))} total</div>
+            </div>
+          )}
+
+          {/* Week summary card */}
+          <div style={{...S.card,padding:20,marginBottom:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+              {[["p1",names.p1,"var(--p1)","#5B96FF"],["p2",names.p2,"var(--p2)","#B06AFF"]].map(([k,label,cv,hex])=>{
+                const paid=thisWExps.filter(e=>e.by===k).reduce((a,e)=>a+e.amt,0);
+                return (
+                  <div key={k} style={{background:`${hex}14`,borderRadius:14,padding:"14px 16px"}}>
+                    <div style={{fontSize:11,fontWeight:700,color:cv,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{label}</div>
+                    <div style={{fontSize:26,fontWeight:800,color:cv}}>{nzd(paid)}</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>paid this week</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:13,color:"var(--muted)",marginBottom:14}}>
+              {thisWExps.length} purchase{thisWExps.length!==1?"s":""} · total {nzd(thisWExps.reduce((a,e)=>a+e.amt,0))}
+            </div>
+            <div style={{borderTop:"1px solid var(--border)",paddingTop:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:14,color:"var(--muted)",fontWeight:600}}>{Math.abs(weekBal)<0.01?"All square this week":balLabel(weekBal)}</div>
+              <div style={{fontSize:26,fontWeight:800,color:Math.abs(weekBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(weekBal)<0.01?"✓":nzd(weekBal)}</div>
+            </div>
+          </div>
+
+          {/* Category breakdown */}
+          {catTotals(thisWExps).length>0 && (<>
+            <span style={{...S.lbl,marginTop:8}}>Spending by category</span>
+            <div style={{...S.card,padding:"8px 0",marginBottom:14,overflow:"hidden"}}>
+              {(() => {
+                const cts=catTotals(thisWExps);
+                const max=cts[0]?.total||1;
+                return cts.map(c=>(
+                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:"1px solid var(--border)"}}>
+                    <span style={{fontSize:18,flexShrink:0}}>{c.emoji}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                        <span style={{fontSize:13,fontWeight:600,color:c.color}}>{c.label}</span>
+                        <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{nzd(c.total)}</span>
+                      </div>
+                      <div style={{background:"var(--border)",borderRadius:99,height:5}}>
+                        <div style={{background:c.color,borderRadius:99,height:5,width:`${(c.total/max)*100}%`,opacity:.8}}/>
+                      </div>
+                    </div>
+                  </div>
+                ));
+              })()}
+            </div>
+          </>)}
+
+          {/* Purchase list */}
+          <span style={{...S.lbl,marginTop:8}}>All purchases</span>
+          {thisWExps.length===0
+            ? <div style={{textAlign:"center",padding:"50px 20px",color:"var(--muted)"}}>
+                <div style={{fontSize:44,marginBottom:12}}>🧾</div>
+                <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing yet</div>
+                <div style={{fontSize:13}}>Add your first expense from the Add tab</div>
+              </div>
+            : <div style={{...S.card,overflow:"hidden"}}>
+                {thisWExps.map(exp=>{
+                  const c=catById(exp.category||"other");
+                  return (
+                    <div key={exp.id} className="row" style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12}}>
+                      <div style={{width:40,height:40,borderRadius:12,flexShrink:0,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{c.emoji}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:15,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.where}</div>
+                        <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
+                          {exp.by==="p1"?names.p1:names.p2} · {shortDate(exp.ts)}
+                          {exp.frequency&&exp.frequency!=="once"&&<span style={{marginLeft:6,fontSize:11,color:c.color,fontWeight:600}}>↻ {exp.frequency}</span>}
+                        </div>
+                      </div>
+                      <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
+                      <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#2E2E42",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
+                    </div>
+                  );
+                })}
+              </div>
+          }
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════
+          BUDGET TAB
+      ══════════════════════════════════════════════════════ */}
+      {tab==="budget" && (
+        <div style={S.page}>
+          {/* Month nav */}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+            <button onClick={()=>setBudgetMo(prevMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:22,padding:"4px 8px"}}>‹</button>
+            <div style={{textAlign:"center"}}>
+              <div style={S.title}>{moLabel(budgetMo)}</div>
+            </div>
+            <button onClick={()=>setBudgetMo(nextMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:budgetMo>=curMo()?"var(--border)":"var(--muted)",fontSize:22,padding:"4px 8px"}} disabled={budgetMo>=curMo()}>›</button>
+          </div>
+
+          {/* Monthly total overview */}
+          {(() => {
+            const totalSpent = bmoExps.reduce((a,e)=>a+e.amt,0);
+            const totalBudget = Object.values(budgets).reduce((a,b)=>a+b,0);
+            const p = pct(totalSpent, totalBudget);
+            return (
+              <div style={{...S.card,padding:20,marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                  <div>
+                    <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>Total spent</div>
+                    <div style={{fontSize:32,fontWeight:800,color:"var(--text)"}}>{nzd(totalSpent)}</div>
+                    {totalBudget>0 && <div style={{fontSize:13,color:"var(--muted)",marginTop:2}}>of {nzd(totalBudget)} budget</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>{bmoExps.length} purchases</div>
+                    <div style={{fontSize:22,fontWeight:800,color:Math.abs(getBal(bmoExps))<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(getBal(bmoExps))<0.01?"✓":nzd(getBal(bmoExps))}</div>
+                    <div style={{fontSize:12,color:"var(--muted)"}}>{Math.abs(getBal(bmoExps))<0.01?"square":balLabel(getBal(bmoExps))}</div>
+                  </div>
+                </div>
+                {totalBudget>0 && <>
+                  <div style={{background:"var(--border)",borderRadius:99,height:8,marginBottom:6}}>
+                    <div style={{background:barColor(p),borderRadius:99,height:8,width:`${p}%`,transition:"width .4s ease"}}/>
+                  </div>
+                  <div style={{fontSize:12,color:"var(--muted)",textAlign:"right"}}>{p}% of monthly budget used</div>
+                </>}
+                {totalBudget===0 && <div style={{fontSize:13,color:"var(--muted)",textAlign:"center",padding:"4px 0"}}>Tap categories below to set monthly budgets</div>}
+              </div>
             );
-          })
-        ),
-        h("div", { style: { fontSize: 13, color: "var(--muted)", marginBottom: 14 } },
-          thisWExps.length, " purchase", thisWExps.length !== 1 ? "s" : "", " · Total spent ",
-          h("b", { style: { color: "var(--text)" } }, nzd(thisWExps.reduce((a, e) => a + e.amt, 0)))
-        ),
-        h("div", { style: { borderTop: "1px solid var(--border)", paddingTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          h("div", { style: { fontSize: 14, color: "var(--muted)", fontWeight: 600 } },
-            Math.abs(weekBal) < 0.01 ? "All square this week" : balLabel(weekBal)
-          ),
-          h("div", { style: { fontSize: 26, fontWeight: 800, color: Math.abs(weekBal) < 0.01 ? "var(--green)" : "var(--amber)" } },
-            Math.abs(weekBal) < 0.01 ? "✓" : nzd(weekBal)
-          )
-        )
-      ),
+          })()}
 
-      // Purchase list
-      h("div", { style: { fontSize: 11, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".1em", marginBottom: 10, marginTop: 8 } }, "Purchases this week"),
+          {/* Per-category budgets */}
+          <span style={S.lbl}>By category — tap to set budget</span>
+          <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
+            {CATS.map((c,i)=>{
+              const spent = bmoExps.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
+              const budget = budgets[c.id]||0;
+              const p = pct(spent,budget);
+              if (spent===0&&!budget) return null;
+              return (
+                <button key={c.id} className="budget-row" onClick={()=>{setDraftBudget(budget?String(budget):"");setModal({type:"budget",catId:c.id});}}
+                  style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"14px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
+                  <div style={{width:38,height:38,borderRadius:11,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{c.emoji}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{c.label}</span>
+                      <span style={{fontSize:14,fontWeight:700,color:budget>0?barColor(p):"var(--text)"}}>
+                        {nzd(spent)}{budget>0?` / ${nzd(budget)}`:""}
+                      </span>
+                    </div>
+                    {budget>0
+                      ? <><div style={{background:"var(--border)",borderRadius:99,height:5}}>
+                          <div style={{background:barColor(p),borderRadius:99,height:5,width:`${p}%`,transition:"width .4s"}}/>
+                        </div>
+                        <div style={{fontSize:11,color:"var(--muted)",marginTop:4,textAlign:"right"}}>{p}%{p>=100?" — over budget ⚠️":p>=80?" — nearly there":""}</div>
+                        </>
+                      : <div style={{fontSize:12,color:"var(--muted)"}}>No budget set — tap to add one</div>
+                    }
+                  </div>
+                </button>
+              );
+            })}
+            {/* Untracked categories prompt */}
+            <button className="budget-row" onClick={()=>{setDraftBudget("");setModal({type:"budget",catId:CATS.find(c=>!budgets[c.id]&&bmoExps.filter(e=>(e.category||"other")===c.id).length===0)?.id||"other"});}}
+              style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"none",border:"none",cursor:"pointer",color:"var(--muted)"}}>
+              <span style={{fontSize:18}}>＋</span>
+              <span style={{fontSize:14,fontWeight:500}}>Add budget for another category</span>
+            </button>
+          </div>
 
-      thisWExps.length === 0
-        ? h("div", { style: { textAlign: "center", padding: "60px 20px", color: "var(--muted)" } },
-            h("div", { style: { fontSize: 48, marginBottom: 14 } }, "🧾"),
-            h("div", { style: { fontSize: 17, fontWeight: 700, marginBottom: 6 } }, "Nothing yet"),
-            h("div", { style: { fontSize: 14 } }, "Add your first expense from the Add tab")
-          )
-        : h("div", { style: { ...c.card, overflow: "hidden" } },
-            thisWExps.map(exp =>
-              h("div", { key: exp.id, className: "row", style: { display: "flex", alignItems: "center", padding: "14px 16px", borderBottom: "1px solid var(--border)", gap: 12 } },
-                h("div", { style: { width: 40, height: 40, borderRadius: 12, flexShrink: 0, background: exp.by === "p1" ? "#1D4ED815" : "#7C3AED15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, fontWeight: 800, color: exp.by === "p1" ? "var(--p1)" : "var(--p2)" } },
-                  (exp.by === "p1" ? names.p1 : names.p2)[0]
-                ),
-                h("div", { style: { flex: 1, minWidth: 0 } },
-                  h("div", { style: { fontSize: 15, fontWeight: 600, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, exp.where),
-                  h("div", { style: { fontSize: 12, color: "var(--muted)", marginTop: 2 } }, (exp.by === "p1" ? names.p1 : names.p2), " · ", shortDate(exp.ts))
-                ),
-                h("div", { style: { fontSize: 17, fontWeight: 800, color: "var(--text)", flexShrink: 0 } }, nzd(exp.amt)),
-                h("button", { onClick: () => setDeleteId(exp.id), style: { background: "none", border: "none", cursor: "pointer", color: "#C7C7CC", fontSize: 22, padding: "0 0 0 8px", flexShrink: 0, lineHeight: 1 } }, "×")
-              )
-            )
-          )
-    ),
+          {/* Recurring items */}
+          {recurringItems.length>0 && (<>
+            <span style={S.lbl}>Monthly recurring</span>
+            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
+              {recurringItems.map((e,i)=>{
+                const c=catById(e.category||"other");
+                return (
+                  <div key={e.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
+                    <div style={{width:38,height:38,borderRadius:11,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{c.emoji}</div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.where}</div>
+                      <div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{e.by==="p1"?names.p1:names.p2} · <span style={{color:c.color}}>↻ {e.frequency}</span></div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>{nzd(e.monthlyAmt)}<span style={{fontSize:11,fontWeight:400,color:"var(--muted)"}}>/mo</span></div>
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",background:"var(--surf2)"}}>
+                <span style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>Estimated monthly fixed</span>
+                <span style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>{nzd(recurringItems.reduce((a,e)=>a+e.monthlyAmt,0))}<span style={{fontSize:11,fontWeight:400,color:"var(--muted)"}}>/mo</span></span>
+              </div>
+            </div>
+          </>)}
+        </div>
+      )}
 
-    // ═══════════════════════════════════════════
-    //  TAB BAR
-    // ═══════════════════════════════════════════
-    h("div", { style: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 430, background: "var(--card)", borderTop: "1px solid var(--border)", display: "flex", zIndex: 100, paddingBottom: "env(safe-area-inset-bottom,0px)" } },
-      [
-        ["add",  "Add",
-          h("svg", { key: "i1", width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" },
-            h("circle", { cx: 12, cy: 12, r: 9 }), h("line", { x1: 12, y1: 8, x2: 12, y2: 16 }), h("line", { x1: 8, y1: 12, x2: 16, y2: 12 })
-          )
-        ],
-        ["week", "Week",
-          h("svg", { key: "i2", width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2.5, strokeLinecap: "round", strokeLinejoin: "round" },
-            h("rect", { x: 3, y: 4, width: 18, height: 18, rx: 2 }), h("line", { x1: 16, y1: 2, x2: 16, y2: 6 }), h("line", { x1: 8, y1: 2, x2: 8, y2: 6 }), h("line", { x1: 3, y1: 10, x2: 21, y2: 10 })
-          )
-        ],
-      ].map(([t, label, icon]) =>
-        h("button", { key: t, className: "tab-btn", onClick: () => setTab(t),
-          style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, padding: "10px 0", background: "none", border: "none", cursor: "pointer", color: tab === t ? "var(--p1)" : "var(--muted)", fontSize: 11, fontWeight: tab === t ? 700 : 400 }
-        }, icon, label)
-      )
-    )
+      {/* ══════════════════════════════════════════════════════
+          TAB BAR
+      ══════════════════════════════════════════════════════ */}
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"var(--surf)",borderTop:"1px solid var(--border)",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+        {[
+          ["add",    "Add",    <svg key="a" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={9}/><line x1={12} y1={8} x2={12} y2={16}/><line x1={8} y1={12} x2={16} y2={12}/></svg>],
+          ["week",   "Week",   <svg key="w" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><rect x={3} y={4} width={18} height={18} rx={2}/><line x1={16} y1={2} x2={16} y2={6}/><line x1={8} y1={2} x2={8} y2={6}/><line x1={3} y1={10} x2={21} y2={10}/></svg>],
+          ["budget", "Budget", <svg key="b" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><line x1={18} y1={20} x2={18} y2={10}/><line x1={12} y1={20} x2={12} y2={4}/><line x1={6} y1={20} x2={6} y2={14}/></svg>],
+        ].map(([t,label,icon])=>(
+          <button key={t} className="tab-btn" onClick={()=>setTab(t)}
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:tab===t?"var(--p1)":"var(--muted)",fontSize:11,fontWeight:tab===t?700:400}}>
+            {icon}{label}
+          </button>
+        ))}
+      </div>
+
+    </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(
-  IS_CONFIGURED ? h(App) : h(SetupScreen)
-);
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 </body>
 </html>

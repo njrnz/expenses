@@ -42,9 +42,9 @@
     .add-btn:active       { transform: scale(.98); }
     .tab-btn:active       { opacity: .5; }
     .budget-row:active    { background: var(--surf2) !important; }
+    .quick-card:active    { transform: scale(.96); }
 
-    /* Initial loading state before React mounts */
-    #boot { display:flex; justify-content:center; align-items:center; height:100vh; }
+    #boot { display:flex;justify-content:center;align-items:center;height:100vh; }
     #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #252535;border-top-color:#5B96FF;animation:spin .7s linear infinite; }
   </style>
 </head>
@@ -61,7 +61,7 @@
 const { useState, useEffect, useCallback, useRef, useMemo } = React;
 
 // ═══════════════════════════════════════════════════════════════
-//  CONFIG  — your Firebase credentials
+//  CONFIG
 // ═══════════════════════════════════════════════════════════════
 const FIREBASE_CONFIG = {
   apiKey:            "AIzaSyDSnrvUcXuOvF3f4uR4RLNt_ZunntQaFBA",
@@ -94,7 +94,6 @@ const FREQS = [
   { id:"monthly", label:"↻ Monthly" },
 ];
 const catById = id => {
-  // Migrate old IDs → new combined/removed categories
   if (id === "dining" || id === "entertainment") return CATS.find(c => c.id === "dining_fun");
   if (id === "transport" || id === "health" || id === "shopping") return CATS.find(c => c.id === "other");
   return CATS.find(c => c.id === id) || CATS[CATS.length - 1];
@@ -112,54 +111,61 @@ const curMo   = () => { const n=new Date(); return `${n.getFullYear()}-${String(
 const prevMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===1?`${y-1}-12`:`${y}-${String(mo-1).padStart(2,"0")}`; };
 const nextMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===12?`${y+1}-01`:`${y}-${String(mo+1).padStart(2,"0")}`; };
 const moLabel = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,mo-1,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"}); };
-const moExps  = (exps,m) => exps.filter(e => e.ts && e.ts.startsWith(m));
+const shortMo = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,mo-1,1).toLocaleDateString("en-NZ",{month:"short"}); };
+const moExps  = (exps,m) => exps.filter(e=>e.ts&&e.ts.startsWith(m));
 
 const nzd       = n   => new Intl.NumberFormat("en-NZ",{style:"currency",currency:"NZD"}).format(Math.abs(n));
 const shortDate = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"short",month:"short",day:"numeric"});
 const longDate  = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long"});
-const getBal    = exps => exps.reduce((a,e) => a+(e.by==="p1"?e.amt/2:-e.amt/2), 0);
+const getBal    = exps => exps.reduce((a,e)=>a+(e.by==="p1"?e.amt/2:-e.amt/2),0);
+// Settlements: p2 paying p1 reduces positive balance; p1 paying p2 increases it
+const getSettleBal = ss => ss.reduce((a,s)=>a+(s.from==="p2"?-s.amt:s.amt),0);
 
-const pct = (spent, budget) => budget > 0 ? Math.min(Math.round((spent/budget)*100), 100) : 0;
-const barColor = p => p >= 100 ? "var(--red)" : p >= 80 ? "var(--amber)" : "var(--green)";
+const pct      = (spent,budget) => budget>0 ? Math.min(Math.round((spent/budget)*100),100) : 0;
+const barColor = p => p>=100?"var(--red)":p>=80?"var(--amber)":"var(--green)";
 
 // ═══════════════════════════════════════════════════════════════
 //  APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
-  // ── Data ────────────────────────────────────────────────────
-  const [exps,     setExps]     = useState([]);
-  const [names,    setNames]    = useState(DEFAULT_NAMES);
-  const [budgets,  setBudgets]  = useState({});
-  const [loading,  setLoading]  = useState(true);
-  const [syncing,  setSyncing]  = useState(false);
+  // ── Persisted data ──────────────────────────────────────────
+  const [exps,        setExps]       = useState([]);
+  const [settlements, setSettlements]= useState([]);
+  const [names,       setNames]      = useState(DEFAULT_NAMES);
+  const [budgets,     setBudgets]    = useState({});
+  const [loading,     setLoading]    = useState(true);
+  const [syncing,     setSyncing]    = useState(false);
 
-  // ── Nav ─────────────────────────────────────────────────────
-  const [tab,      setTab]      = useState("add");
-  const [budgetMo, setBudgetMo] = useState(curMo());
+  // ── Navigation ──────────────────────────────────────────────
+  const [tab,       setTab]      = useState("add");
+  const [budgetMo,  setBudgetMo] = useState(curMo());
 
   // ── Add form ────────────────────────────────────────────────
   const [by,    setBy]    = useState(null);
   const [amt,   setAmt]   = useState("");
   const [cat,   setCat]   = useState(null);
   const [where, setWhere] = useState("");
+  const [note,  setNote]  = useState("");
   const [freq,  setFreq]  = useState("once");
   const [wFocus,setWFocus]= useState(false);
 
-  // ── UI ──────────────────────────────────────────────────────
-  const [toast,       setToast]       = useState(null);
-  const [modal,       setModal]       = useState(null); // {type, id?, catId?}
-  const [draftNames,  setDraftNames]  = useState({p1:"",p2:""});
-  const [draftBudget, setDraftBudget] = useState("");
+  // ── UI state ────────────────────────────────────────────────
+  const [toast,       setToast]      = useState(null);
+  const [modal,       setModal]      = useState(null);
+  const [draftNames,  setDraftNames] = useState({p1:"",p2:""});
+  const [draftBudget, setDraftBudget]= useState("");
+  const [draftSettle, setDraftSettle]= useState("");
 
   const amtRef   = useRef(null);
   const whereRef = useRef(null);
 
-  // ── Firebase ─────────────────────────────────────────────────
+  // ── Firebase real-time listener ──────────────────────────────
   useEffect(() => {
     const ref = db.ref("/tracker");
     ref.on("value", snap => {
       const d = snap.val() || {};
       setExps((d.expenses||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
+      setSettlements((d.settlements||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
       if (d.names)   setNames(d.names);
       if (d.budgets) setBudgets(d.budgets);
       setLoading(false); setSyncing(false);
@@ -167,9 +173,9 @@ function App() {
     return () => ref.off();
   }, []);
 
-  const persist = useCallback(async (e, n, b) => {
+  const persist = useCallback(async (e, n, b, s) => {
     setSyncing(true);
-    try { await db.ref("/tracker").set({ expenses:e, names:n, budgets:b }); }
+    try { await db.ref("/tracker").set({ expenses:e, names:n, budgets:b, settlements:s }); }
     catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
   }, []);
 
@@ -189,16 +195,22 @@ function App() {
     return suggs.filter(s=>s.place.toLowerCase().includes(q)&&s.place.toLowerCase()!==q).slice(0,5);
   }, [where, wFocus, suggs]);
 
-  // ── Derived ──────────────────────────────────────────────────
+  // ── Derived values ───────────────────────────────────────────
   const thisW     = weekOf();
   const lastW     = weekOf(new Date(Date.now()-7*86400000));
   const isThur    = new Date().getDay()===4;
   const thisWExps = exps.filter(e=>e.week===thisW);
   const lastWExps = exps.filter(e=>e.week===lastW);
+  const thisWSettl= settlements.filter(s=>s.week===thisW);
   const bmoExps   = moExps(exps, budgetMo);
-  const totalBal  = getBal(exps);
-  const weekBal   = getBal(thisWExps);
-  const lastBal   = getBal(lastWExps);
+  const lastMoExp = moExps(exps, prevMo(budgetMo));
+
+  // Balance includes settlements
+  const expBal   = getBal(exps);
+  const settlBal = getSettleBal(settlements);
+  const totalBal = expBal + settlBal;
+  const weekBal  = getBal(thisWExps);
+  const lastBal  = getBal(lastWExps);
 
   const aC   = by==="p1"?"var(--p1)":by==="p2"?"var(--p2)":"var(--text)";
   const aHex = by==="p1"?"#5B96FF":by==="p2"?"#B06AFF":"#EDEDF2";
@@ -230,34 +242,49 @@ function App() {
     if (!by) return toast_("Tap who paid first",true);
     const v=parseFloat(amt);
     if (!v||v<=0) return toast_("Enter a valid amount",true);
-    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq};
+    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq,note:note.trim()||null};
     const ne=[exp,...exps];
-    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setWFocus(false);
+    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setWFocus(false);
     toast_(`${nzd(v)} added ✓`);
-    await persist(ne,names,budgets);
+    await persist(ne,names,budgets,settlements);
   }
+
   async function delExp(id) {
     const ne=exps.filter(e=>e.id!==id); setModal(null);
-    await persist(ne,names,budgets);
+    await persist(ne,names,budgets,settlements);
   }
-  async function saveName() {
+
+  async function saveNames() {
     const nn={p1:draftNames.p1.trim()||names.p1, p2:draftNames.p2.trim()||names.p2};
     setModal(null); toast_("Names saved ✓");
-    await persist(exps,nn,budgets);
+    await persist(exps,nn,budgets,settlements);
   }
+
   async function saveBudget(catId) {
     const v=parseFloat(draftBudget);
     if(!v||v<=0){setModal(null);return;}
     const nb={...budgets,[catId]:v}; setBudgets(nb); setModal(null); toast_("Budget saved ✓");
-    await persist(exps,names,nb);
+    await persist(exps,names,nb,settlements);
   }
 
-  // ── Shared style values ──────────────────────────────────────
+  async function settleUp() {
+    const v=parseFloat(draftSettle);
+    if(!v||v<=0){setModal(null);return;}
+    const debtor   = totalBal>0?"p2":"p1";
+    const creditor = totalBal>0?"p1":"p2";
+    const s={id:String(Date.now()),ts:new Date().toISOString(),amt:v,from:debtor,to:creditor,week:thisW};
+    const ns=[s,...settlements];
+    setModal(null); toast_(`Settled up ${nzd(v)} ✓`);
+    await persist(exps,names,budgets,ns);
+  }
+
+  // ── Shared style constants ────────────────────────────────────
   const S = {
     card:  {background:"var(--surf)",borderRadius:20,border:"1.5px solid var(--border)"},
     lbl:   {fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10,display:"block"},
     page:  {padding:"28px 20px 0"},
     title: {fontSize:27,fontWeight:800,letterSpacing:"-0.7px",color:"var(--text)",marginBottom:4},
+    opt:   {textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11},
   };
 
   if (loading) return (
@@ -291,30 +318,31 @@ function App() {
         </div>
       )}
 
-      {/* ── MODAL: Settings (partner name) ── */}
+      {/* ── MODAL: Edit names ── */}
       {modal?.type==="settings" && (
         <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
           <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
             <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 28px"}}/>
             <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Edit names</div>
             <div style={{fontSize:14,color:"var(--muted)",marginBottom:22,lineHeight:1.5}}>Change the names shown on buttons and summaries.</div>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Your name</div>
+            <div style={{...S.lbl,marginBottom:8}}>Your name</div>
             <input value={draftNames.p1} onChange={e=>setDraftNames({...draftNames,p1:e.target.value})} placeholder={names.p1} autoFocus
               style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:16,color:"var(--text)",background:"var(--surf2)"}}/>
-            <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Partner's name</div>
+            <div style={{...S.lbl,marginBottom:8}}>Partner's name</div>
             <input value={draftNames.p2} onChange={e=>setDraftNames({...draftNames,p2:e.target.value})} placeholder={names.p2}
-              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:20,color:"var(--text)",background:"var(--surf2)"}}/>
-            <button onClick={saveName} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Save names</button>
+              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:22,color:"var(--text)",background:"var(--surf2)"}}/>
+            <button onClick={saveNames} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Save names</button>
           </div>
         </div>
       )}
 
       {/* ── MODAL: Set budget ── */}
-      {modal?.type==="budget" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-            {(() => { const c=catById(modal.catId); return (<>
+      {modal?.type==="budget" && (()=>{
+        const c=catById(modal.catId);
+        return (
+          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
               <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
                 <div style={{width:44,height:44,borderRadius:14,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{c.emoji}</div>
                 <div>
@@ -327,11 +355,39 @@ function App() {
                 <input type="text" inputMode="decimal" placeholder="0.00" value={draftBudget} onChange={e=>setDraftBudget(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
                   style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
-                <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer",gridColumn:budgets[modal.catId]?"auto":"1/-1"}}>Save budget</button>
+              <div style={{display:"grid",gridTemplateColumns:budgets[modal.catId]?"1fr 1fr":"1fr",gap:10}}>
+                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save budget</button>
               </div>
-            </>); })()}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── MODAL: Settle up ── */}
+      {modal?.type==="settle" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
+            <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Settle up</div>
+            <div style={{fontSize:14,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>
+              Records a payment between you two. Edit the amount for a partial settlement.
+            </div>
+            {/* Who owes whom */}
+            <div style={{background:"var(--surf2)",borderRadius:16,padding:"16px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:13,color:"var(--muted)",marginBottom:3}}>{balLabel(totalBal)}</div>
+                <div style={{fontSize:11,color:"var(--muted)"}}>before settlement</div>
+              </div>
+              <div style={{fontSize:26,fontWeight:800,color:"var(--amber)"}}>{nzd(totalBal)}</div>
+            </div>
+            {/* Amount input */}
+            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:22,border:"2px solid var(--green)"}}>
+              <span style={{fontSize:26,color:"var(--green)",fontWeight:300}}>$</span>
+              <input type="text" inputMode="decimal" value={draftSettle} onChange={e=>setDraftSettle(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
+                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--green)",letterSpacing:"-1px"}}/>
+            </div>
+            <button onClick={settleUp} style={{width:"100%",background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Confirm settlement</button>
           </div>
         </div>
       )}
@@ -341,6 +397,7 @@ function App() {
       ══════════════════════════════════════════════════════ */}
       {tab==="add" && (
         <div style={S.page}>
+
           {/* Header */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
             <div>
@@ -355,13 +412,24 @@ function App() {
             </button>
           </div>
 
-          {/* Balance pill */}
-          <div style={{background:Math.abs(totalBal)<0.01?"#0D2A1E":"#1F1A0A",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#1A4D33":"#3D3010"}`,borderRadius:16,padding:"14px 18px",marginBottom:26,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontSize:13,fontWeight:600,color:Math.abs(totalBal)<0.01?"#2ECFA0":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"All square":"Running total — "+balLabel(totalBal)}</div>
-            <div style={{fontSize:20,fontWeight:800,color:Math.abs(totalBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"✓":nzd(totalBal)}</div>
+          {/* Balance pill — with Settle up button when there's a balance */}
+          <div style={{background:Math.abs(totalBal)<0.01?"#0D2A1E":"#1F1A0A",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#1A4D33":"#3D3010"}`,borderRadius:16,padding:"13px 16px",marginBottom:22,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:13,fontWeight:600,color:Math.abs(totalBal)<0.01?"#2ECFA0":"var(--amber)"}}>
+              {Math.abs(totalBal)<0.01?"All square":"Running total"}
+              {Math.abs(totalBal)>=0.01&&<div style={{fontSize:12,fontWeight:500,color:"var(--muted)",marginTop:2}}>{balLabel(totalBal)}</div>}
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontSize:20,fontWeight:800,color:Math.abs(totalBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"✓":nzd(totalBal)}</div>
+              {Math.abs(totalBal)>=0.01&&(
+                <button onClick={()=>{setDraftSettle(Math.abs(totalBal).toFixed(2));setModal({type:"settle"});}}
+                  style={{background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:10,padding:"7px 12px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+                  Settle ↗
+                </button>
+              )}
+            </div>
           </div>
 
-          {/* Quick add — recurring items */}
+          {/* Quick add recurring */}
           {recurringItems.length>0 && (
             <div style={{marginBottom:22}}>
               <span style={S.lbl}>Quick add recurring</span>
@@ -369,16 +437,15 @@ function App() {
                 {recurringItems.map(e=>{
                   const c=catById(e.category||"other");
                   return (
-                    <button key={e.id} onClick={()=>{
+                    <button key={e.id} className="quick-card" onClick={()=>{
                       setBy(e.by); setCat(e.category||"other"); setWhere(e.where);
-                      setAmt(String(e.amt)); setFreq(e.frequency);
+                      setAmt(String(e.amt)); setFreq(e.frequency); setNote("");
                       setTimeout(()=>amtRef.current?.focus(),50);
-                    }}
-                      style={{flexShrink:0,background:"var(--surf)",border:`1.5px solid ${c.color}50`,borderRadius:14,padding:"10px 14px",cursor:"pointer",textAlign:"left",minWidth:120}}>
-                      <div style={{fontSize:15,marginBottom:3}}>{c.emoji}</div>
-                      <div style={{fontSize:13,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:100}}>{e.where}</div>
-                      <div style={{fontSize:12,color:c.color,fontWeight:600,marginTop:1}}>{nzd(e.amt)}</div>
-                      <div style={{fontSize:10,color:"var(--muted)",marginTop:1}}>↻ {e.frequency} · {e.by==="p1"?names.p1:names.p2}</div>
+                    }} style={{flexShrink:0,background:"var(--surf)",border:`1.5px solid ${c.color}40`,borderRadius:14,padding:"10px 14px",cursor:"pointer",textAlign:"left",minWidth:120,transition:"transform .15s"}}>
+                      <div style={{fontSize:16,marginBottom:3}}>{c.emoji}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110}}>{e.where}</div>
+                      <div style={{fontSize:12,color:c.color,fontWeight:600,marginTop:2}}>{nzd(e.amt)}</div>
+                      <div style={{fontSize:10,color:"var(--muted)",marginTop:2}}>↻ {e.frequency} · {e.by==="p1"?names.p1:names.p2}</div>
                     </button>
                   );
                 })}
@@ -405,40 +472,36 @@ function App() {
               style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#2E2E42",transition:"color .2s"}}/>
           </div>
 
-          {/* Category grid */}
+          {/* Category */}
           <span style={S.lbl}>Category</span>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
             {CATS.map(c=>(
               <button key={c.id} className="cat-btn" onClick={()=>setCat(cat===c.id?null:c.id)}
                 style={{padding:"10px 6px",background:cat===c.id?`${c.color}22`:"var(--surf)",border:`2px solid ${cat===c.id?c.color:"var(--border)"}`,borderRadius:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4,transition:"all .15s"}}>
                 <span style={{fontSize:18}}>{c.emoji}</span>
-                <span style={{fontSize:11,fontWeight:cat===c.id?700:500,color:cat===c.id?c.color:"var(--muted)",letterSpacing:"0.01em"}}>{c.label}</span>
+                <span style={{fontSize:11,fontWeight:cat===c.id?700:500,color:cat===c.id?c.color:"var(--muted)"}}>{c.label}</span>
               </button>
             ))}
           </div>
 
           {/* Where */}
-          <span style={S.lbl}>Where? <span style={{textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11}}>(optional)</span></span>
-          <div style={{position:"relative",marginBottom:18}}>
-            <div style={{...S.card,padding:"16px 20px",border:`2px solid ${where?aC:wFocus?"#44445A":"var(--border)"}`,transition:"border-color .2s",borderRadius:filtSuggs.length>0&&wFocus?"20px 20px 0 0":20}}>
+          <span style={S.lbl}>Where? <span style={S.opt}>(optional)</span></span>
+          <div style={{position:"relative",marginBottom:14}}>
+            <div style={{...S.card,padding:"15px 20px",border:`2px solid ${where?aC:wFocus?"#44445A":"var(--border)"}`,transition:"border-color .2s",borderRadius:filtSuggs.length>0&&wFocus?"20px 20px 0 0":20}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
-                {suggs.length>0 && <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={where?aC:"var(--muted)"} strokeWidth={2} strokeLinecap="round" style={{flexShrink:0}}>
-                  <circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/>
-                </svg>}
+                {suggs.length>0&&<svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={where?aC:"var(--muted)"} strokeWidth={2} strokeLinecap="round" style={{flexShrink:0}}><circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/></svg>}
                 <input ref={whereRef} type="text" placeholder={suggs.length>0?"Tap for recent places…":"PAK'nSave, power bill…"} value={where}
                   onChange={e=>setWhere(e.target.value)} onFocus={()=>setWFocus(true)} onBlur={()=>setTimeout(()=>setWFocus(false),150)}
                   style={{fontSize:17,fontWeight:500,border:"none",background:"none",width:"100%",color:where?"var(--text)":"#2E2E42"}}/>
               </div>
             </div>
-            {wFocus&&filtSuggs.length>0 && (
+            {wFocus&&filtSuggs.length>0&&(
               <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--surf)",borderRadius:"0 0 20px 20px",border:"2px solid var(--border)",borderTop:"1px solid var(--border)",overflow:"hidden",zIndex:50,boxShadow:"0 12px 32px rgba(0,0,0,.4)"}}>
                 {filtSuggs.map(({place,count})=>(
                   <button key={place} className="sugg-row" onMouseDown={e=>e.preventDefault()} onClick={()=>{setWhere(place);setWFocus(false);whereRef.current?.blur();}}
-                    style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"13px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
-                    <div style={{width:32,height:32,borderRadius:9,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2} strokeLinecap="round">
-                        <circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/>
-                      </svg>
+                    style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
+                    <div style={{width:30,height:30,borderRadius:9,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2} strokeLinecap="round"><circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/></svg>
                     </div>
                     <span style={{fontSize:15,fontWeight:600,color:"var(--text)",flex:1}}>{place}</span>
                     {count>1&&<span style={{fontSize:12,color:"var(--muted)",background:"var(--surf2)",borderRadius:99,padding:"3px 8px",fontWeight:600}}>×{count}</span>}
@@ -446,6 +509,13 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Note */}
+          <span style={S.lbl}>Note <span style={S.opt}>(optional)</span></span>
+          <div style={{...S.card,padding:"14px 20px",marginBottom:18,border:`2px solid ${note?aC:"var(--border)"}`,transition:"border-color .2s"}}>
+            <input type="text" placeholder="School shoes, Nick's work dinner, Findlay's birthday…" value={note} onChange={e=>setNote(e.target.value)}
+              style={{fontSize:15,fontWeight:500,border:"none",background:"none",width:"100%",color:note?"var(--text)":"#2E2E42"}}/>
           </div>
 
           {/* Frequency */}
@@ -478,7 +548,7 @@ function App() {
           </div>
 
           {/* Thursday: last week tally */}
-          {isThur&&lastWExps.length>0 && (
+          {isThur&&lastWExps.length>0&&(
             <div style={{background:"#0F1035",border:"1.5px solid #2A2A6A",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:700,color:"#8888DD",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
@@ -489,7 +559,7 @@ function App() {
             </div>
           )}
 
-          {/* Week summary card */}
+          {/* Week summary */}
           <div style={{...S.card,padding:20,marginBottom:14}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
               {[["p1",names.p1,"var(--p1)","#5B96FF"],["p2",names.p2,"var(--p2)","#B06AFF"]].map(([k,label,cv,hex])=>{
@@ -513,57 +583,71 @@ function App() {
           </div>
 
           {/* Category breakdown */}
-          {catTotals(thisWExps).length>0 && (<>
-            <span style={{...S.lbl,marginTop:8}}>Spending by category</span>
-            <div style={{...S.card,padding:"8px 0",marginBottom:14,overflow:"hidden"}}>
-              {(() => {
-                const cts=catTotals(thisWExps);
-                const max=cts[0]?.total||1;
-                return cts.map(c=>(
-                  <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:"1px solid var(--border)"}}>
-                    <span style={{fontSize:18,flexShrink:0}}>{c.emoji}</span>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                        <span style={{fontSize:13,fontWeight:600,color:c.color}}>{c.label}</span>
-                        <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{nzd(c.total)}</span>
-                      </div>
-                      <div style={{background:"var(--border)",borderRadius:99,height:5}}>
-                        <div style={{background:c.color,borderRadius:99,height:5,width:`${(c.total/max)*100}%`,opacity:.8}}/>
-                      </div>
+          {catTotals(thisWExps).length>0&&(<>
+            <span style={{...S.lbl,marginTop:8}}>By category</span>
+            <div style={{...S.card,padding:"6px 0",marginBottom:14}}>
+              {(()=>{const cts=catTotals(thisWExps);const max=cts[0]?.total||1;return cts.map(c=>(
+                <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:"1px solid var(--border)"}}>
+                  <span style={{fontSize:18,flexShrink:0}}>{c.emoji}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                      <span style={{fontSize:13,fontWeight:600,color:c.color}}>{c.label}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{nzd(c.total)}</span>
+                    </div>
+                    <div style={{background:"var(--border)",borderRadius:99,height:5}}>
+                      <div style={{background:c.color,borderRadius:99,height:5,width:`${(c.total/max)*100}%`,opacity:.85}}/>
                     </div>
                   </div>
-                ));
-              })()}
+                </div>
+              ))})()}
+            </div>
+          </>)}
+
+          {/* Settlements this week */}
+          {thisWSettl.length>0&&(<>
+            <span style={{...S.lbl,marginTop:8}}>Settlements</span>
+            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
+              {thisWSettl.map(s=>(
+                <div key={s.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
+                  <div style={{width:40,height:40,borderRadius:12,background:"#0D2A1E",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✓</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:15,fontWeight:600,color:"var(--green)"}}>Settled up</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.from==="p1"?names.p1:names.p2} → {s.to==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
+                  </div>
+                  <div style={{fontSize:17,fontWeight:800,color:"var(--green)",flexShrink:0}}>{nzd(s.amt)}</div>
+                </div>
+              ))}
             </div>
           </>)}
 
           {/* Purchase list */}
-          <span style={{...S.lbl,marginTop:8}}>All purchases</span>
+          <span style={{...S.lbl,marginTop:8}}>Purchases</span>
           {thisWExps.length===0
-            ? <div style={{textAlign:"center",padding:"50px 20px",color:"var(--muted)"}}>
-                <div style={{fontSize:44,marginBottom:12}}>🧾</div>
-                <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing yet</div>
-                <div style={{fontSize:13}}>Add your first expense from the Add tab</div>
-              </div>
-            : <div style={{...S.card,overflow:"hidden"}}>
-                {thisWExps.map(exp=>{
-                  const c=catById(exp.category||"other");
-                  return (
-                    <div key={exp.id} className="row" style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12}}>
-                      <div style={{width:40,height:40,borderRadius:12,flexShrink:0,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{c.emoji}</div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:15,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.where}</div>
-                        <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
-                          {exp.by==="p1"?names.p1:names.p2} · {shortDate(exp.ts)}
-                          {exp.frequency&&exp.frequency!=="once"&&<span style={{marginLeft:6,fontSize:11,color:c.color,fontWeight:600}}>↻ {exp.frequency}</span>}
-                        </div>
-                      </div>
-                      <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
-                      <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#2E2E42",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
-                    </div>
-                  );
-                })}
-              </div>
+            ?<div style={{textAlign:"center",padding:"50px 20px",color:"var(--muted)"}}>
+               <div style={{fontSize:44,marginBottom:12}}>🧾</div>
+               <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing yet</div>
+               <div style={{fontSize:13}}>Add your first expense from the Add tab</div>
+             </div>
+            :<div style={{...S.card,overflow:"hidden"}}>
+               {thisWExps.map(exp=>{
+                 const c=catById(exp.category||"other");
+                 return (
+                   <div key={exp.id} className="row" style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12}}>
+                     <div style={{width:40,height:40,borderRadius:12,flexShrink:0,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{c.emoji}</div>
+                     <div style={{flex:1,minWidth:0}}>
+                       <div style={{fontSize:15,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.where}</div>
+                       <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
+                         {exp.by==="p1"?names.p1:names.p2} · {shortDate(exp.ts)}
+                         {exp.frequency&&exp.frequency!=="once"&&<span style={{marginLeft:6,color:c.color,fontWeight:600}}>↻ {exp.frequency}</span>}
+                       </div>
+                       {exp.note&&<div style={{fontSize:12,color:"var(--muted)",marginTop:3,fontStyle:"italic"}}>"{exp.note}"</div>}
+                     </div>
+                     <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
+                     <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#2E2E42",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
+                   </div>
+                 );
+               })}
+             </div>
           }
         </div>
       )}
@@ -573,89 +657,105 @@ function App() {
       ══════════════════════════════════════════════════════ */}
       {tab==="budget" && (
         <div style={S.page}>
+
           {/* Month nav */}
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-            <button onClick={()=>setBudgetMo(prevMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:22,padding:"4px 8px"}}>‹</button>
-            <div style={{textAlign:"center"}}>
-              <div style={S.title}>{moLabel(budgetMo)}</div>
-            </div>
-            <button onClick={()=>setBudgetMo(nextMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:budgetMo>=curMo()?"var(--border)":"var(--muted)",fontSize:22,padding:"4px 8px"}} disabled={budgetMo>=curMo()}>›</button>
+            <button onClick={()=>setBudgetMo(prevMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>‹</button>
+            <div style={{...S.title,marginBottom:0,textAlign:"center"}}>{moLabel(budgetMo)}</div>
+            <button onClick={()=>setBudgetMo(nextMo(budgetMo))} disabled={budgetMo>=curMo()} style={{background:"none",border:"none",cursor:"pointer",color:budgetMo>=curMo()?"var(--border)":"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>›</button>
           </div>
 
-          {/* Monthly total overview */}
-          {(() => {
-            const totalSpent = bmoExps.reduce((a,e)=>a+e.amt,0);
-            const totalBudget = Object.values(budgets).reduce((a,b)=>a+b,0);
-            const p = pct(totalSpent, totalBudget);
+          {/* Monthly overview */}
+          {(()=>{
+            const totalSpent    = bmoExps.reduce((a,e)=>a+e.amt,0);
+            const lastMoSpent   = lastMoExp.reduce((a,e)=>a+e.amt,0);
+            const totalBudgetMo = Object.values(budgets).reduce((a,b)=>a+b,0);
+            const p = pct(totalSpent,totalBudgetMo);
+            const diff = lastMoSpent>0 ? totalSpent-lastMoSpent : null;
             return (
               <div style={{...S.card,padding:20,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
                   <div>
                     <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>Total spent</div>
-                    <div style={{fontSize:32,fontWeight:800,color:"var(--text)"}}>{nzd(totalSpent)}</div>
-                    {totalBudget>0 && <div style={{fontSize:13,color:"var(--muted)",marginTop:2}}>of {nzd(totalBudget)} budget</div>}
+                    <div style={{fontSize:34,fontWeight:800,color:"var(--text)",letterSpacing:"-1px"}}>{nzd(totalSpent)}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
+                      {totalBudgetMo>0&&<span style={{fontSize:12,color:"var(--muted)"}}>of {nzd(totalBudgetMo)} budget</span>}
+                      {diff!==null&&<span style={{fontSize:12,fontWeight:700,color:diff>0?"var(--amber)":"var(--green)"}}>
+                        {diff>0?`↑ ${nzd(diff)}`:`↓ ${nzd(diff)}`} vs {shortMo(prevMo(budgetMo))}
+                      </span>}
+                    </div>
                   </div>
                   <div style={{textAlign:"right"}}>
                     <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>{bmoExps.length} purchases</div>
-                    <div style={{fontSize:22,fontWeight:800,color:Math.abs(getBal(bmoExps))<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(getBal(bmoExps))<0.01?"✓":nzd(getBal(bmoExps))}</div>
-                    <div style={{fontSize:12,color:"var(--muted)"}}>{Math.abs(getBal(bmoExps))<0.01?"square":balLabel(getBal(bmoExps))}</div>
+                    <div style={{fontSize:20,fontWeight:800,color:Math.abs(getBal(bmoExps))<0.01?"var(--green)":"var(--amber)"}}>
+                      {Math.abs(getBal(bmoExps))<0.01?"✓":nzd(getBal(bmoExps))}
+                    </div>
+                    <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{Math.abs(getBal(bmoExps))<0.01?"square":balLabel(getBal(bmoExps))}</div>
                   </div>
                 </div>
-                {totalBudget>0 && <>
+                {totalBudgetMo>0&&<>
                   <div style={{background:"var(--border)",borderRadius:99,height:8,marginBottom:6}}>
                     <div style={{background:barColor(p),borderRadius:99,height:8,width:`${p}%`,transition:"width .4s ease"}}/>
                   </div>
                   <div style={{fontSize:12,color:"var(--muted)",textAlign:"right"}}>{p}% of monthly budget used</div>
                 </>}
-                {totalBudget===0 && <div style={{fontSize:13,color:"var(--muted)",textAlign:"center",padding:"4px 0"}}>Tap categories below to set monthly budgets</div>}
+                {totalBudgetMo===0&&<div style={{fontSize:13,color:"var(--muted)",textAlign:"center",paddingTop:4}}>Tap categories below to set monthly budgets</div>}
               </div>
             );
           })()}
 
-          {/* Per-category budgets */}
+          {/* Per-category */}
           <span style={S.lbl}>By category — tap to set budget</span>
           <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-            {CATS.map((c,i)=>{
-              const spent = bmoExps.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
-              const budget = budgets[c.id]||0;
-              const p = pct(spent,budget);
+            {CATS.map(c=>{
+              const spent    = bmoExps.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
+              const lastSpent= lastMoExp.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
+              const budget   = budgets[c.id]||0;
+              const p        = pct(spent,budget);
+              const trend    = lastSpent>0 ? Math.round(((spent-lastSpent)/lastSpent)*100) : null;
               if (spent===0&&!budget) return null;
               return (
                 <button key={c.id} className="budget-row" onClick={()=>{setDraftBudget(budget?String(budget):"");setModal({type:"budget",catId:c.id});}}
                   style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"14px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
                   <div style={{width:38,height:38,borderRadius:11,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{c.emoji}</div>
                   <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                      <span style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{c.label}</span>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{c.label}</span>
+                        {trend!==null&&<span style={{fontSize:11,fontWeight:700,color:trend>0?"var(--amber)":"var(--green)",background:trend>0?"#2A1A08":"#0A1F16",borderRadius:99,padding:"2px 7px"}}>
+                          {trend>0?`↑${trend}%`:`↓${Math.abs(trend)}%`}
+                        </span>}
+                      </div>
                       <span style={{fontSize:14,fontWeight:700,color:budget>0?barColor(p):"var(--text)"}}>
                         {nzd(spent)}{budget>0?` / ${nzd(budget)}`:""}
                       </span>
                     </div>
                     {budget>0
-                      ? <><div style={{background:"var(--border)",borderRadius:99,height:5}}>
+                      ?<><div style={{background:"var(--border)",borderRadius:99,height:5}}>
                           <div style={{background:barColor(p),borderRadius:99,height:5,width:`${p}%`,transition:"width .4s"}}/>
                         </div>
-                        <div style={{fontSize:11,color:"var(--muted)",marginTop:4,textAlign:"right"}}>{p}%{p>=100?" — over budget ⚠️":p>=80?" — nearly there":""}</div>
-                        </>
-                      : <div style={{fontSize:12,color:"var(--muted)"}}>No budget set — tap to add one</div>
+                        <div style={{fontSize:11,color:"var(--muted)",marginTop:4,textAlign:"right"}}>
+                          {p}%{p>=100?" — over budget ⚠️":p>=80?" — nearly there":""}
+                        </div>
+                       </>
+                      :<div style={{fontSize:12,color:"var(--muted)"}}>No budget set — tap to add one</div>
                     }
                   </div>
                 </button>
               );
             })}
-            {/* Untracked categories prompt */}
-            <button className="budget-row" onClick={()=>{setDraftBudget("");setModal({type:"budget",catId:CATS.find(c=>!budgets[c.id]&&bmoExps.filter(e=>(e.category||"other")===c.id).length===0)?.id||"other"});}}
+            <button className="budget-row" onClick={()=>{setDraftBudget("");setModal({type:"budget",catId:CATS.find(c=>!budgets[c.id])?.id||"other"});}}
               style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"none",border:"none",cursor:"pointer",color:"var(--muted)"}}>
               <span style={{fontSize:18}}>＋</span>
               <span style={{fontSize:14,fontWeight:500}}>Add budget for another category</span>
             </button>
           </div>
 
-          {/* Recurring items */}
-          {recurringItems.length>0 && (<>
+          {/* Recurring */}
+          {recurringItems.length>0&&(<>
             <span style={S.lbl}>Monthly recurring</span>
             <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-              {recurringItems.map((e,i)=>{
+              {recurringItems.map(e=>{
                 const c=catById(e.category||"other");
                 return (
                   <div key={e.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
@@ -684,9 +784,12 @@ function App() {
       ══════════════════════════════════════════════════════ */}
       <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"var(--surf)",borderTop:"1px solid var(--border)",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
         {[
-          ["add",    "Add",    <svg key="a" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={9}/><line x1={12} y1={8} x2={12} y2={16}/><line x1={8} y1={12} x2={16} y2={12}/></svg>],
-          ["week",   "Week",   <svg key="w" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><rect x={3} y={4} width={18} height={18} rx={2}/><line x1={16} y1={2} x2={16} y2={6}/><line x1={8} y1={2} x2={8} y2={6}/><line x1={3} y1={10} x2={21} y2={10}/></svg>],
-          ["budget", "Budget", <svg key="b" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><line x1={18} y1={20} x2={18} y2={10}/><line x1={12} y1={20} x2={12} y2={4}/><line x1={6} y1={20} x2={6} y2={14}/></svg>],
+          ["add",    "Add",
+            <svg key="a" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={9}/><line x1={12} y1={8} x2={12} y2={16}/><line x1={8} y1={12} x2={16} y2={12}/></svg>],
+          ["week",   "Week",
+            <svg key="w" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><rect x={3} y={4} width={18} height={18} rx={2}/><line x1={16} y1={2} x2={16} y2={6}/><line x1={8} y1={2} x2={8} y2={6}/><line x1={3} y1={10} x2={21} y2={10}/></svg>],
+          ["budget", "Budget",
+            <svg key="b" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><line x1={18} y1={20} x2={18} y2={10}/><line x1={12} y1={20} x2={12} y2={4}/><line x1={6} y1={20} x2={6} y2={14}/></svg>],
         ].map(([t,label,icon])=>(
           <button key={t} className="tab-btn" onClick={()=>setTab(t)}
             style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:tab===t?"var(--p1)":"var(--muted)",fontSize:11,fontWeight:tab===t?700:400}}>

@@ -52,6 +52,7 @@
 <div id="root"><div id="boot"><div class="sp"></div></div></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -76,6 +77,8 @@ const DEFAULT_NAMES = { p1: "Nick", p2: "Puai" };
 
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.database();
+const auth = firebase.auth();
+auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
 
 // ═══════════════════════════════════════════════════════════════
 //  CONSTANTS
@@ -125,9 +128,76 @@ const pct      = (spent,budget) => budget>0 ? Math.min(Math.round((spent/budget)
 const barColor = p => p>=100?"var(--red)":p>=80?"var(--amber)":"var(--green)";
 
 // ═══════════════════════════════════════════════════════════════
-//  APP
+//  LOGIN SCREEN
 // ═══════════════════════════════════════════════════════════════
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [pass,  setPass]  = useState("");
+  const [err,   setErr]   = useState("");
+  const [busy,  setBusy]  = useState(false);
+
+  async function doLogin(e) {
+    e.preventDefault();
+    setErr(""); setBusy(true);
+    try {
+      await auth.signInWithEmailAndPassword(email.trim(), pass);
+    } catch (ex) {
+      setBusy(false);
+      if (ex.code === "auth/invalid-credential" || ex.code === "auth/wrong-password" || ex.code === "auth/user-not-found") {
+        setErr("Wrong email or password");
+      } else if (ex.code === "auth/invalid-email") {
+        setErr("That doesn't look like a valid email");
+      } else if (ex.code === "auth/too-many-requests") {
+        setErr("Too many attempts — wait a bit and try again");
+      } else {
+        setErr("Couldn't sign in — check your connection");
+      }
+    }
+  }
+
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24}}>
+      <form onSubmit={doLogin} style={{width:"100%",maxWidth:340}}>
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <div style={{fontSize:44,marginBottom:14}}>🔒</div>
+          <div style={{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-0.5px"}}>Expenses</div>
+          <div style={{fontSize:14,color:"var(--muted)",marginTop:6}}>Sign in to continue</div>
+        </div>
+
+        <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Email</div>
+        <input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoFocus
+          style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"15px 18px",fontSize:16,marginBottom:14,color:"var(--text)",background:"var(--surf)"}}/>
+
+        <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Password</div>
+        <input type="password" autoComplete="current-password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••"
+          style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"15px 18px",fontSize:16,marginBottom:18,color:"var(--text)",background:"var(--surf)"}}/>
+
+        {err && <div style={{background:"#2A0F14",border:"1.5px solid #4D1A22",borderRadius:14,padding:"12px 16px",fontSize:13,color:"var(--red)",marginBottom:18,fontWeight:600}}>{err}</div>}
+
+        <button type="submit" disabled={busy||!email||!pass}
+          style={{width:"100%",background:(busy||!email||!pass)?"var(--surf2)":"var(--p1)",color:(busy||!email||!pass)?"var(--muted)":"#fff",border:"none",borderRadius:18,padding:"17px 0",fontSize:17,fontWeight:800,cursor:(busy||!email||!pass)?"default":"pointer"}}>
+          {busy?"Signing in…":"Sign in"}
+        </button>
+
+        <div style={{fontSize:12,color:"var(--muted)",textAlign:"center",marginTop:20,lineHeight:1.6}}>
+          Stays signed in on this device.<br/>You'll only need to do this once.
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
 function App() {
+  // ── Auth ────────────────────────────────────────────────────
+  const [user,       setUser]       = useState(undefined); // undefined = checking, null = logged out
+  const [signingOut, setSigningOut] = useState(false);
+
+  useEffect(() => {
+    const unsub = auth.onAuthStateChanged(u => setUser(u));
+    return unsub;
+  }, []);
+
   // ── Persisted data ──────────────────────────────────────────
   const [exps,        setExps]       = useState([]);
   const [settlements, setSettlements]= useState([]);
@@ -161,7 +231,8 @@ function App() {
 
   // ── Firebase real-time listener ──────────────────────────────
   useEffect(() => {
-    const ref = db.ref("/tracker");
+    if (!user) { setLoading(false); return; }
+    const ref = db.ref("/tracker-32ae945b1ea1512a226cd186");
     ref.on("value", snap => {
       const d = snap.val() || {};
       setExps((d.expenses||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
@@ -171,11 +242,11 @@ function App() {
       setLoading(false); setSyncing(false);
     }, () => setLoading(false));
     return () => ref.off();
-  }, []);
+  }, [user]);
 
   const persist = useCallback(async (e, n, b, s) => {
     setSyncing(true);
-    try { await db.ref("/tracker").set({ expenses:e, names:n, budgets:b, settlements:s }); }
+    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s }); }
     catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
   }, []);
 
@@ -287,6 +358,14 @@ function App() {
     opt:   {textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11},
   };
 
+  if (user === undefined) return (
+    <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
+      <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
+    </div>
+  );
+
+  if (user === null) return <LoginScreen/>;
+
   if (loading) return (
     <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
       <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
@@ -331,7 +410,10 @@ function App() {
             <div style={{...S.lbl,marginBottom:8}}>Partner's name</div>
             <input value={draftNames.p2} onChange={e=>setDraftNames({...draftNames,p2:e.target.value})} placeholder={names.p2}
               style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:22,color:"var(--text)",background:"var(--surf2)"}}/>
-            <button onClick={saveNames} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Save names</button>
+            <button onClick={saveNames} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer",marginBottom:12}}>Save names</button>
+            <button onClick={()=>{setSigningOut(true);auth.signOut();}} style={{width:"100%",background:"none",color:"var(--muted)",border:"none",padding:"10px 0",fontSize:14,fontWeight:600,cursor:"pointer"}}>
+              {signingOut?"Signing out…":`Sign out (${user?.email||""})`}
+            </button>
           </div>
         </div>
       )}

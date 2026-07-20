@@ -5,28 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Expenses">
-  <meta name="theme-color" content="#1B1B21">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#F2F1EC">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Expenses</title>
   <style>
     :root {
-      --bg:     #1B1B21;
-      --surf:   #3D3D4C;
-      --surf2:  #4A4A5B;
-      --border: #5C5C6F;
-      --text:   #F5F4F8;
-      --muted:  #B7B7CA;
-      --p1:     #6FA8FF;
-      --p2:     #C08BFF;
-      --green:  #3EDCAE;
-      --amber:  #FFC24D;
-      --red:    #FF7580;
+      --bg:     #F2F1EC;
+      --surf:   #FFFFFF;
+      --surf2:  #EBE9E1;
+      --border: #DDDAD0;
+      --text:   #1A1A1F;
+      --muted:  #6E6E78;
+      --p1:     #2F6FED;
+      --p2:     #8A3FEF;
+      --green:  #15915F;
+      --amber:  #B45309;
+      --red:    #C22B3A;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; background: var(--bg); }
     body { font-family: system-ui, -apple-system, sans-serif; color: var(--text); }
     input, button { font-family: inherit; outline: none; -webkit-appearance: none; }
-    input::placeholder { color: #6C6C79; }
+    input::placeholder { color: #C6C3B8; }
     ::-webkit-scrollbar { display: none; }
 
     @keyframes spin    { to { transform: rotate(360deg); } }
@@ -49,7 +49,7 @@
     .quick-card:active    { transform: scale(.96); }
 
     #boot { display:flex;justify-content:center;align-items:center;height:100vh; }
-    #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #5C5C6F;border-top-color:#6FA8FF;animation:spin .7s linear infinite; }
+    #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #DDDAD0;border-top-color:#2F6FED;animation:spin .7s linear infinite; }
   </style>
 </head>
 <body>
@@ -96,9 +96,10 @@ const CATS = [
   { id:"other",         label:"Other",        emoji:"🏷️", color:"#94A3B8" },
 ];
 const FREQS = [
-  { id:"once",    label:"One-off"   },
-  { id:"weekly",  label:"↻ Weekly"  },
-  { id:"monthly", label:"↻ Monthly" },
+  { id:"once",       label:"One-off"     },
+  { id:"weekly",     label:"↻ Weekly"    },
+  { id:"fortnightly",label:"↻ Fortnight" },
+  { id:"monthly",    label:"↻ Monthly"   },
 ];
 const catById = id => {
   if (id === "dining" || id === "entertainment") return CATS.find(c => c.id === "dining_fun");
@@ -181,7 +182,7 @@ function LoginScreen() {
         <input type="password" autoComplete="current-password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••"
           style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"15px 18px",fontSize:16,marginBottom:18,color:"var(--text)",background:"var(--surf)"}}/>
 
-        {err && <div style={{background:"#3A1620",border:"1.5px solid #5C2530",borderRadius:14,padding:"12px 16px",fontSize:13,color:"var(--red)",marginBottom:18,fontWeight:600}}>{err}</div>}
+        {err && <div style={{background:"#FCEBEC",border:"1.5px solid #F2C7CC",borderRadius:14,padding:"12px 16px",fontSize:13,color:"var(--red)",marginBottom:18,fontWeight:600}}>{err}</div>}
 
         <button type="submit" disabled={busy||!email||!pass}
           style={{width:"100%",background:(busy||!email||!pass)?"var(--surf2)":"var(--p1)",color:(busy||!email||!pass)?"var(--muted)":"#fff",border:"none",borderRadius:18,padding:"17px 0",fontSize:17,fontWeight:800,cursor:(busy||!email||!pass)?"default":"pointer"}}>
@@ -227,6 +228,7 @@ function App() {
   const [note,  setNote]  = useState("");
   const [freq,  setFreq]  = useState("once");
   const [wFocus,setWFocus]= useState(false);
+  const [showRecurring,setShowRecurring]= useState(false);
 
   // ── UI state ────────────────────────────────────────────────
   const [toast,       setToast]      = useState(null);
@@ -293,7 +295,7 @@ function App() {
   const lastBal  = getBal(splittable(lastWExps));
 
   const aC   = by==="p1"?"var(--p1)":by==="p2"?"var(--p2)":"var(--text)";
-  const aHex = by==="p1"?"#6FA8FF":by==="p2"?"#C08BFF":"#F1F0F4";
+  const aHex = by==="p1"?"#2F6FED":by==="p2"?"#8A3FEF":"#1A1A1F";
 
   const balLabel = b => {
     if (Math.abs(b)<0.01) return "All square ✓";
@@ -313,7 +315,7 @@ function App() {
       if(!seen[k]||e.ts>seen[k].ts) seen[k]=e;
     });
     return Object.values(seen).map(e=>({
-      ...e, monthlyAmt:e.frequency==="weekly"?e.amt*(52/12):e.amt
+      ...e, monthlyAmt:e.frequency==="weekly"?e.amt*(52/12):e.frequency==="fortnightly"?e.amt*(26/12):e.amt
     })).sort((a,b)=>b.monthlyAmt-a.monthlyAmt);
   },[exps]);
 
@@ -504,7 +506,7 @@ function App() {
           </div>
 
           {/* Balance pill — with Settle up button when there's a balance */}
-          <div style={{background:Math.abs(totalBal)<0.01?"#173226":"#3A2C12",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#255C41":"#5C4318"}`,borderRadius:16,padding:"13px 16px",marginBottom:22,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{background:Math.abs(totalBal)<0.01?"#E7F7EF":"#FFF4E0",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#BFE8D3":"#FBDFA8"}`,borderRadius:16,padding:"13px 16px",marginBottom:22,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:13,fontWeight:600,color:Math.abs(totalBal)<0.01?"#2ECFA0":"var(--amber)"}}>
               {Math.abs(totalBal)<0.01?"All square":"Running total"}
               {Math.abs(totalBal)>=0.01&&<div style={{fontSize:12,fontWeight:500,color:"var(--muted)",marginTop:2}}>{balLabel(totalBal)}</div>}
@@ -523,30 +525,40 @@ function App() {
           {/* Quick add recurring */}
           {recurringItems.length>0 && (
             <div style={{marginBottom:18}}>
-              <span style={S.lbl}>Quick add recurring</span>
-              <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4,marginRight:-20,paddingRight:20}}>
-                {recurringItems.map(e=>{
-                  const c=catById(e.category||"other");
-                  return (
-                    <button key={e.id} className="quick-card" onClick={()=>{
-                      setBy(e.by); setCat(e.category||"other"); setWhere(e.where);
-                      setAmt(String(e.amt)); setFreq(e.frequency); setNote("");
-                      setTimeout(()=>amtRef.current?.focus(),50);
-                    }} style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,background:"var(--surf)",border:`1.5px solid ${c.color}40`,borderRadius:99,padding:"8px 13px 8px 10px",cursor:"pointer",transition:"transform .15s"}}>
-                      <span style={{fontSize:14}}>{c.emoji}</span>
-                      <span style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis"}}>{e.where}</span>
-                      <span style={{fontSize:12,fontWeight:800,color:c.color,whiteSpace:"nowrap"}}>{nzd(e.amt)}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <button onClick={()=>setShowRecurring(!showRecurring)}
+                style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:0,marginBottom:showRecurring?10:0}}>
+                <span style={{...S.lbl,marginBottom:0}}>Quick add recurring</span>
+                <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",background:"var(--surf2)",borderRadius:99,padding:"1px 7px"}}>{recurringItems.length}</span>
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
+                  style={{transition:"transform .2s",transform:showRecurring?"rotate(180deg)":"rotate(0deg)"}}>
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              {showRecurring && (
+                <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4,marginRight:-20,paddingRight:20,animation:"tabfade .2s ease"}}>
+                  {recurringItems.map(e=>{
+                    const c=catById(e.category||"other");
+                    return (
+                      <button key={e.id} className="quick-card" onClick={()=>{
+                        setBy(e.by); setCat(e.category||"other"); setWhere(e.where);
+                        setAmt(String(e.amt)); setFreq(e.frequency); setNote("");
+                        setTimeout(()=>amtRef.current?.focus(),50);
+                      }} style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,background:"var(--surf)",border:`1.5px solid ${c.color}40`,borderRadius:99,padding:"8px 13px 8px 10px",cursor:"pointer",transition:"transform .15s"}}>
+                        <span style={{fontSize:14}}>{c.emoji}</span>
+                        <span style={{fontSize:12,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",maxWidth:80,overflow:"hidden",textOverflow:"ellipsis"}}>{e.where}</span>
+                        <span style={{fontSize:12,fontWeight:800,color:c.color,whiteSpace:"nowrap"}}>{nzd(e.amt)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
           {/* Who paid */}
           <span style={S.lbl}>Who paid?</span>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:22}}>
-            {[["p1",names.p1,"var(--p1)","#6FA8FF"],["p2",names.p2,"var(--p2)","#C08BFF"]].map(([k,label,cv,hex])=>(
+            {[["p1",names.p1,"var(--p1)","#2F6FED"],["p2",names.p2,"var(--p2)","#8A3FEF"]].map(([k,label,cv,hex])=>(
               <button key={k} className="btn-name" onClick={()=>{setBy(k);setTimeout(()=>amtRef.current?.focus(),50);}}
                 style={{padding:"22px 16px",background:by===k?cv:"var(--surf)",color:by===k?"#fff":"var(--text)",border:`2.5px solid ${by===k?cv:"var(--border)"}`,borderRadius:20,cursor:"pointer",fontSize:22,fontWeight:800,transition:"all .15s ease",boxShadow:by===k?`0 6px 28px ${hex}50`:"none"}}>
                 {label}
@@ -557,9 +569,9 @@ function App() {
           {/* Amount */}
           <span style={S.lbl}>Amount</span>
           <div style={{...S.card,padding:"14px 20px",marginBottom:18,display:"flex",alignItems:"center",gap:6,border:`2px solid ${amt?aC:"var(--border)"}`,transition:"border-color .2s"}}>
-            <span style={{fontSize:30,color:amt?aC:"#6C6C79",fontWeight:300,lineHeight:1,transition:"color .2s"}}>$</span>
+            <span style={{fontSize:30,color:amt?aC:"#C6C3B8",fontWeight:300,lineHeight:1,transition:"color .2s"}}>$</span>
             <input ref={amtRef} type="text" inputMode="decimal" placeholder="0.00" value={amt} onChange={e=>setAmt(e.target.value.replace(/[^0-9.]/g,""))}
-              style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#6C6C79",transition:"color .2s"}}/>
+              style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#C6C3B8",transition:"color .2s"}}/>
           </div>
 
           {/* Category */}
@@ -582,7 +594,7 @@ function App() {
                 {suggs.length>0&&<svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={where?aC:"var(--muted)"} strokeWidth={2} strokeLinecap="round" style={{flexShrink:0}}><circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/></svg>}
                 <input ref={whereRef} type="text" placeholder={suggs.length>0?"Tap for recent places…":"PAK'nSave, power bill…"} value={where}
                   onChange={e=>setWhere(e.target.value)} onFocus={()=>setWFocus(true)} onBlur={()=>setTimeout(()=>setWFocus(false),150)}
-                  style={{fontSize:17,fontWeight:500,border:"none",background:"none",width:"100%",color:where?"var(--text)":"#6C6C79"}}/>
+                  style={{fontSize:17,fontWeight:500,border:"none",background:"none",width:"100%",color:where?"var(--text)":"#C6C3B8"}}/>
               </div>
             </div>
             {wFocus&&filtSuggs.length>0&&(
@@ -605,15 +617,15 @@ function App() {
           <span style={S.lbl}>Note <span style={S.opt}>(optional)</span></span>
           <div style={{...S.card,padding:"14px 20px",marginBottom:18,border:`2px solid ${note?aC:"var(--border)"}`,transition:"border-color .2s"}}>
             <input type="text" placeholder="School shoes, Nick's work dinner, Findlay's birthday…" value={note} onChange={e=>setNote(e.target.value)}
-              style={{fontSize:15,fontWeight:500,border:"none",background:"none",width:"100%",color:note?"var(--text)":"#6C6C79"}}/>
+              style={{fontSize:15,fontWeight:500,border:"none",background:"none",width:"100%",color:note?"var(--text)":"#C6C3B8"}}/>
           </div>
 
           {/* Frequency */}
           <span style={S.lbl}>Frequency</span>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:28}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:28}}>
             {FREQS.map(f=>(
               <button key={f.id} onClick={()=>setFreq(f.id)}
-                style={{padding:"12px 8px",background:freq===f.id?"var(--surf2)":"var(--surf)",border:`2px solid ${freq===f.id?"var(--p1)":"var(--border)"}`,borderRadius:14,cursor:"pointer",fontSize:13,fontWeight:freq===f.id?700:500,color:freq===f.id?"var(--p1)":"var(--muted)",transition:"all .15s"}}>
+                style={{padding:"11px 4px",background:freq===f.id?"var(--surf2)":"var(--surf)",border:`2px solid ${freq===f.id?"var(--p1)":"var(--border)"}`,borderRadius:13,cursor:"pointer",fontSize:11.5,fontWeight:freq===f.id?700:500,color:freq===f.id?"var(--p1)":"var(--muted)",transition:"all .15s"}}>
                 {f.label}
               </button>
             ))}
@@ -639,20 +651,20 @@ function App() {
 
           {/* Thursday: last week tally */}
           {isThur&&lastWExps.length>0&&(
-            <div style={{background:"#242850",border:"1.5px solid #3B3F8C",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#A9AEFF",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
+            <div style={{background:"#EEF0FF",border:"1.5px solid #C7CCFA",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#4B4FC4",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{fontSize:16,fontWeight:700,color:"#C6C9FF"}}>{Math.abs(lastBal)<0.01?"All square ✓":balLabel(lastBal)}</div>
-                <div style={{fontSize:26,fontWeight:800,color:"#C6C9FF"}}>{Math.abs(lastBal)<0.01?"✓":nzd(lastBal)}</div>
+                <div style={{fontSize:16,fontWeight:700,color:"#3C40B8"}}>{Math.abs(lastBal)<0.01?"All square ✓":balLabel(lastBal)}</div>
+                <div style={{fontSize:26,fontWeight:800,color:"#4B4FC4"}}>{Math.abs(lastBal)<0.01?"✓":nzd(lastBal)}</div>
               </div>
-              <div style={{fontSize:13,color:"#9B9EE0"}}>{lastWExps.length} purchases · {nzd(lastWExps.reduce((a,e)=>a+e.amt,0))} total</div>
+              <div style={{fontSize:13,color:"#6669C9"}}>{lastWExps.length} purchases · {nzd(lastWExps.reduce((a,e)=>a+e.amt,0))} total</div>
             </div>
           )}
 
           {/* Week summary */}
           <div style={{...S.card,padding:20,marginBottom:14}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
-              {[["p1",names.p1,"var(--p1)","#6FA8FF"],["p2",names.p2,"var(--p2)","#C08BFF"]].map(([k,label,cv,hex])=>{
+              {[["p1",names.p1,"var(--p1)","#2F6FED"],["p2",names.p2,"var(--p2)","#8A3FEF"]].map(([k,label,cv,hex])=>{
                 const paid=thisWExps.filter(e=>e.by===k).reduce((a,e)=>a+e.amt,0);
                 return (
                   <div key={k} style={{background:`${hex}14`,borderRadius:14,padding:"14px 16px"}}>
@@ -699,7 +711,7 @@ function App() {
             <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
               {thisWSettl.map(s=>(
                 <div key={s.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
-                  <div style={{width:40,height:40,borderRadius:12,background:"#173226",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✓</div>
+                  <div style={{width:40,height:40,borderRadius:12,background:"#E7F7EF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✓</div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:15,fontWeight:600,color:"var(--green)"}}>Settled up</div>
                     <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.from==="p1"?names.p1:names.p2} → {s.to==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
@@ -733,7 +745,7 @@ function App() {
                        {exp.note&&<div style={{fontSize:12,color:"var(--muted)",marginTop:3,fontStyle:"italic"}}>"{exp.note}"</div>}
                      </div>
                      <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
-                     <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#6C6C79",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
+                     <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#C6C3B8",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
                    </div>
                  );
                })}
@@ -860,7 +872,7 @@ function App() {
                     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{c.label}</span>
-                        {trend!==null&&<span style={{fontSize:11,fontWeight:700,color:trend>0?"var(--amber)":"var(--green)",background:trend>0?"#3A2C12":"#173226",borderRadius:99,padding:"2px 7px"}}>
+                        {trend!==null&&<span style={{fontSize:11,fontWeight:700,color:trend>0?"var(--amber)":"var(--green)",background:trend>0?"#FBEBD3":"#DFF3EA",borderRadius:99,padding:"2px 7px"}}>
                           {trend>0?`↑${trend}%`:`↓${Math.abs(trend)}%`}
                         </span>}
                       </div>

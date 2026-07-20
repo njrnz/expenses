@@ -138,6 +138,8 @@ const splittable = exps => exps.filter(e => !catById(e.category||"other").noSpli
 const getSettleBal = ss => ss.reduce((a,s)=>a+(s.from==="p2"?-s.amt:s.amt),0);
 
 const pct      = (spent,budget) => budget>0 ? Math.min(Math.round((spent/budget)*100),100) : 0;
+const monthlyEquiv = (amt,freq) => freq==="weekly"?amt*(52/12):freq==="fortnightly"?amt*(26/12):amt;
+const weeklyEquiv  = (amt,freq) => freq==="monthly"?amt*(12/52):freq==="fortnightly"?amt/2:amt;
 const barColor = p => p>=100?"var(--red)":p>=80?"var(--amber)":"var(--green)";
 
 // ═══════════════════════════════════════════════════════════════
@@ -216,12 +218,15 @@ function App() {
   const [settlements, setSettlements]= useState([]);
   const [names,       setNames]      = useState(DEFAULT_NAMES);
   const [budgets,     setBudgets]    = useState({});
+  const [income,      setIncome]     = useState({});
+  const [buffer,      setBuffer]     = useState(null);
   const [loading,     setLoading]    = useState(true);
   const [syncing,     setSyncing]    = useState(false);
 
   // ── Navigation ──────────────────────────────────────────────
   const [tab,       setTab]      = useState("add");
   const [budgetMo,  setBudgetMo] = useState(curMo());
+  const [viewWeekOffset, setViewWeekOffset] = useState(0);
 
   // ── Add form ────────────────────────────────────────────────
   const [by,    setBy]    = useState(null);
@@ -230,6 +235,7 @@ function App() {
   const [where, setWhere] = useState("");
   const [note,  setNote]  = useState("");
   const [freq,  setFreq]  = useState("once");
+  const [unexpected, setUnexpected] = useState(false);
   const [wFocus,setWFocus]= useState(false);
   const [showRecurring,setShowRecurring]= useState(false);
 
@@ -238,6 +244,9 @@ function App() {
   const [modal,       setModal]      = useState(null);
   const [draftNames,  setDraftNames] = useState({p1:"",p2:""});
   const [draftBudget, setDraftBudget]= useState("");
+  const [draftIncome,  setDraftIncome]= useState({amt:"",freq:"monthly"});
+  const [draftBuffer,  setDraftBuffer]= useState("");
+  const [editDraft,    setEditDraft]  = useState(null);
   const [draftSettle, setDraftSettle]= useState("");
 
   const amtRef   = useRef(null);
@@ -253,14 +262,16 @@ function App() {
       setSettlements((d.settlements||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
       if (d.names)   setNames(d.names);
       if (d.budgets) setBudgets(d.budgets);
+      if (d.income)  setIncome(d.income);
+      if (d.buffer)  setBuffer(d.buffer);
       setLoading(false); setSyncing(false);
     }, () => setLoading(false));
     return () => ref.off();
   }, [user]);
 
-  const persist = useCallback(async (e, n, b, s) => {
+  const persist = useCallback(async (e, n, b, s, inc, buf) => {
     setSyncing(true);
-    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s }); }
+    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s, income:inc, buffer:buf }); }
     catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
   }, []);
 
@@ -287,6 +298,10 @@ function App() {
   const thisWExps = exps.filter(e=>e.week===thisW);
   const lastWExps = exps.filter(e=>e.week===lastW);
   const thisWSettl= settlements.filter(s=>s.week===thisW);
+  const viewW     = weekOf(new Date(Date.now() + viewWeekOffset*7*86400000));
+  const viewWExps = exps.filter(e=>e.week===viewW);
+  const viewWSettl= settlements.filter(s=>s.week===viewW);
+  const viewWBal  = getBal(splittable(viewWExps));
   const bmoExps   = moExps(exps, budgetMo);
   const lastMoExp = moExps(exps, prevMo(budgetMo));
 
@@ -327,29 +342,90 @@ function App() {
     if (!by) return toast_("Tap who paid first",true);
     const v=parseFloat(amt);
     if (!v||v<=0) return toast_("Enter a valid amount",true);
-    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq,note:note.trim()||null};
+    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq,note:note.trim()||null,unexpected:unexpected};
     const ne=[exp,...exps];
-    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setWFocus(false);
+    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setWFocus(false); setUnexpected(false);
     toast_(`${nzd(v)} added ✓`);
-    await persist(ne,names,budgets,settlements);
+    await persist(ne,names,budgets,settlements,income,buffer);
   }
 
   async function delExp(id) {
     const ne=exps.filter(e=>e.id!==id); setModal(null);
-    await persist(ne,names,budgets,settlements);
+    await persist(ne,names,budgets,settlements,income,buffer);
+  }
+
+  function startEdit(exp) {
+    setEditDraft({
+      id: exp.id, by: exp.by, amt: String(exp.amt), category: exp.category||"other",
+      where: exp.where==="Unspecified"?"":exp.where, note: exp.note||"",
+      frequency: exp.frequency||"once", unexpected: !!exp.unexpected
+    });
+    setModal({type:"edit"});
+  }
+
+  async function saveEdit() {
+    const v = parseFloat(editDraft.amt);
+    if (!v||v<=0) return toast_("Enter a valid amount",true);
+    const ne = exps.map(e => e.id===editDraft.id
+      ? {...e, by:editDraft.by, amt:v, category:editDraft.category, where:editDraft.where.trim()||"Unspecified", note:editDraft.note.trim()||null, frequency:editDraft.frequency, unexpected:editDraft.unexpected}
+      : e
+    );
+    setModal(null); toast_("Expense updated ✓");
+    await persist(ne,names,budgets,settlements,income,buffer);
   }
 
   async function saveNames() {
     const nn={p1:draftNames.p1.trim()||names.p1, p2:draftNames.p2.trim()||names.p2};
     setModal(null); toast_("Names saved ✓");
-    await persist(exps,nn,budgets,settlements);
+    await persist(exps,nn,budgets,settlements,income,buffer);
+  }
+
+  function exportCSV() {
+    const rows = [["Date","Amount","Category","Where","Paid By","Frequency","Unexpected","Note"]];
+    [...exps].sort((a,b)=>a.ts.localeCompare(b.ts)).forEach(e=>{
+      const c = catById(e.category||"other");
+      rows.push([
+        new Date(e.ts).toLocaleDateString("en-NZ"),
+        e.amt.toFixed(2),
+        c.label,
+        e.where||"",
+        e.by==="p1"?names.p1:names.p2,
+        e.frequency||"once",
+        e.unexpected?"yes":"no",
+        (e.note||"").replace(/"/g,'""')
+      ]);
+    });
+    const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `expenses-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast_("CSV downloaded ✓");
   }
 
   async function saveBudget(catId) {
     const v=parseFloat(draftBudget);
     if(!v||v<=0){setModal(null);return;}
     const nb={...budgets,[catId]:v}; setBudgets(nb); setModal(null); toast_("Budget saved ✓");
-    await persist(exps,names,nb,settlements);
+    await persist(exps,names,nb,settlements,income,buffer);
+  }
+
+  async function saveIncome(who) {
+    const v=parseFloat(draftIncome.amt);
+    if(!v||v<=0){setModal(null);return;}
+    const ni={...income,[who]:{amt:v,freq:draftIncome.freq}};
+    setIncome(ni); setModal(null); toast_("Income saved ✓");
+    await persist(exps,names,budgets,settlements,ni,buffer);
+  }
+
+  async function saveBuffer() {
+    const v=parseFloat(draftBuffer);
+    if(!v||v<=0){setModal(null);return;}
+    const nbuf={amt:v}; setBuffer(nbuf); setModal(null); toast_("Buffer target saved ✓");
+    await persist(exps,names,budgets,settlements,income,nbuf);
   }
 
   async function settleUp() {
@@ -360,7 +436,7 @@ function App() {
     const s={id:String(Date.now()),ts:new Date().toISOString(),amt:v,from:debtor,to:creditor,week:thisW};
     const ns=[s,...settlements];
     setModal(null); toast_(`Settled up ${nzd(v)} ✓`);
-    await persist(exps,names,budgets,ns);
+    await persist(exps,names,budgets,ns,income,buffer);
   }
 
   // ── Shared style constants ────────────────────────────────────
@@ -411,6 +487,76 @@ function App() {
         </div>
       )}
 
+      {/* ── MODAL: Edit expense ── */}
+      {modal?.type==="edit" && editDraft && (()=>{
+        const eC = editDraft.by==="p1"?"var(--p1)":editDraft.by==="p2"?"var(--p2)":"var(--text)";
+        return (
+          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 44px",animation:"slidein .25s ease",maxHeight:"85vh",overflowY:"auto"}}>
+              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 20px"}}/>
+              <div style={{fontSize:20,fontWeight:800,marginBottom:18}}>Edit expense</div>
+
+              <span style={{...S.lbl,marginBottom:8}}>Who paid?</span>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+                {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>(
+                  <button key={k} onClick={()=>setEditDraft({...editDraft,by:k})}
+                    style={{padding:"14px 10px",background:editDraft.by===k?cv:"var(--surf2)",color:editDraft.by===k?"#fff":"var(--text)",border:"none",borderRadius:14,cursor:"pointer",fontSize:16,fontWeight:700}}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <span style={{...S.lbl,marginBottom:8}}>Amount</span>
+              <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--surf2)",borderRadius:14,padding:"10px 16px",marginBottom:16,border:`2px solid ${eC}`}}>
+                <span style={{fontSize:22,color:eC,fontWeight:300}}>$</span>
+                <input type="text" inputMode="decimal" value={editDraft.amt} onChange={e=>setEditDraft({...editDraft,amt:e.target.value.replace(/[^0-9.]/g,"")})}
+                  style={{fontSize:26,fontWeight:800,border:"none",background:"none",width:"100%",color:eC}}/>
+              </div>
+
+              <span style={{...S.lbl,marginBottom:8}}>Category</span>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:16}}>
+                {CATS.map(c=>(
+                  <button key={c.id} onClick={()=>setEditDraft({...editDraft,category:c.id})}
+                    style={{padding:"9px 4px",background:editDraft.category===c.id?`${c.color}22`:"var(--surf2)",border:`2px solid ${editDraft.category===c.id?c.color:"transparent"}`,borderRadius:12,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                    <span style={{fontSize:16}}>{c.emoji}</span>
+                    <span style={{fontSize:10.5,fontWeight:editDraft.category===c.id?700:500,color:editDraft.category===c.id?c.color:"var(--muted)"}}>{c.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <span style={{...S.lbl,marginBottom:8}}>Where</span>
+              <input type="text" value={editDraft.where} onChange={e=>setEditDraft({...editDraft,where:e.target.value})}
+                style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:15,marginBottom:16,color:"var(--text)"}}/>
+
+              <span style={{...S.lbl,marginBottom:8}}>Note</span>
+              <input type="text" value={editDraft.note} onChange={e=>setEditDraft({...editDraft,note:e.target.value})}
+                style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:14,marginBottom:16,color:"var(--text)"}}/>
+
+              <span style={{...S.lbl,marginBottom:8}}>Frequency</span>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
+                {FREQS.map(f=>(
+                  <button key={f.id} onClick={()=>setEditDraft({...editDraft,frequency:f.id})}
+                    style={{padding:"9px 2px",background:editDraft.frequency===f.id?"var(--surf2)":"none",border:`2px solid ${editDraft.frequency===f.id?"var(--p1)":"var(--border)"}`,borderRadius:12,cursor:"pointer",fontSize:10.5,fontWeight:editDraft.frequency===f.id?700:500,color:editDraft.frequency===f.id?"var(--p1)":"var(--muted)"}}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+
+              <button onClick={()=>setEditDraft({...editDraft,unexpected:!editDraft.unexpected})}
+                style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:editDraft.unexpected?"#FFF4E0":"var(--surf2)",border:`2px solid ${editDraft.unexpected?"var(--amber)":"transparent"}`,borderRadius:14,padding:"11px 0",cursor:"pointer",marginBottom:20}}>
+                <span style={{fontSize:14}}>⚠️</span>
+                <span style={{fontSize:13,fontWeight:700,color:editDraft.unexpected?"var(--amber)":"var(--muted)"}}>{editDraft.unexpected?"Marked as unexpected":"Mark as unexpected"}</span>
+              </button>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <button onClick={()=>{setModal({type:"delete",id:editDraft.id});}} style={{padding:15,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Delete</button>
+                <button onClick={saveEdit} style={{padding:15,background:eC,color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save changes</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── MODAL: Edit names ── */}
       {modal?.type==="settings" && (
         <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
@@ -425,6 +571,10 @@ function App() {
             <input value={draftNames.p2} onChange={e=>setDraftNames({...draftNames,p2:e.target.value})} placeholder={names.p2}
               style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:22,color:"var(--text)",background:"var(--surf2)"}}/>
             <button onClick={saveNames} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer",marginBottom:12}}>Save names</button>
+            <button onClick={exportCSV} style={{width:"100%",background:"var(--surf2)",color:"var(--text)",border:"none",borderRadius:16,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1={12} y1={15} x2={12} y2={3}/></svg>
+              Export data (CSV)
+            </button>
             <button onClick={()=>{setSigningOut(true);auth.signOut();}} style={{width:"100%",background:"none",color:"var(--muted)",border:"none",padding:"10px 0",fontSize:14,fontWeight:600,cursor:"pointer"}}>
               {signingOut?"Signing out…":`Sign out (${user?.email||""})`}
             </button>
@@ -452,13 +602,66 @@ function App() {
                   style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:budgets[modal.catId]?"1fr 1fr":"1fr",gap:10}}>
-                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements,income,buffer);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
                 <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save budget</button>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* ── MODAL: Set income ── */}
+      {modal?.type==="income" && (()=>{
+        const who = modal.who;
+        const label = who==="p1"?names.p1:names.p2;
+        const cv = who==="p1"?"var(--p1)":"var(--p2)";
+        return (
+          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
+              <div style={{fontSize:20,fontWeight:800,marginBottom:4,color:cv}}>{label}'s income</div>
+              <div style={{fontSize:13,color:"var(--muted)",marginBottom:20}}>Used to calculate what's left after expenses.</div>
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:14,border:"2px solid var(--border)"}}>
+                <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
+                <input type="text" inputMode="decimal" placeholder="0.00" value={draftIncome.amt} onChange={e=>setDraftIncome({...draftIncome,amt:e.target.value.replace(/[^0-9.]/g,"")})} autoFocus
+                  style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:20}}>
+                {[["weekly","Weekly"],["fortnightly","Fortnight"],["monthly","Monthly"]].map(([id,l])=>(
+                  <button key={id} onClick={()=>setDraftIncome({...draftIncome,freq:id})}
+                    style={{padding:"11px 4px",background:draftIncome.freq===id?"var(--surf2)":"none",border:`2px solid ${draftIncome.freq===id?cv:"var(--border)"}`,borderRadius:13,cursor:"pointer",fontSize:12.5,fontWeight:draftIncome.freq===id?700:500,color:draftIncome.freq===id?cv:"var(--muted)"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:income[who]?"1fr 1fr":"1fr",gap:10}}>
+                {income[who] && <button onClick={()=>{const ni={...income};delete ni[who];setIncome(ni);persist(exps,names,budgets,settlements,ni,buffer);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                <button onClick={()=>saveIncome(who)} style={{padding:16,background:cv,color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save income</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── MODAL: Set unexpected buffer target ── */}
+      {modal?.type==="buffer" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
+            <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>⚠️ Unexpected buffer</div>
+            <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>How much you'd like to set aside each month for surprise costs — car repairs, vet bills, that kind of thing.</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:18,border:"2px solid var(--border)"}}>
+              <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
+              <input type="text" inputMode="decimal" placeholder="0.00" value={draftBuffer} onChange={e=>setDraftBuffer(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
+                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:buffer?"1fr 1fr":"1fr",gap:10}}>
+              {buffer && <button onClick={()=>{setBuffer(null);persist(exps,names,budgets,settlements,income,null);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+              <button onClick={saveBuffer} style={{padding:16,background:"var(--amber)",color:"#1A1A1F",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save target</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL: Settle up ── */}
       {modal?.type==="settle" && (
@@ -646,6 +849,13 @@ function App() {
             ))}
           </div>
 
+          {/* Unexpected toggle */}
+          <button onClick={()=>setUnexpected(!unexpected)}
+            style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:unexpected?"#FFF4E0":"var(--surf)",border:`2px solid ${unexpected?"var(--amber)":"var(--border)"}`,borderRadius:16,padding:"13px 0",cursor:"pointer",marginBottom:18,transition:"all .15s"}}>
+            <span style={{fontSize:16}}>⚠️</span>
+            <span style={{fontSize:14,fontWeight:700,color:unexpected?"var(--amber)":"var(--muted)"}}>{unexpected?"Marked as unexpected":"Mark as unexpected expense"}</span>
+          </button>
+
           {/* Submit */}
           <button className="add-btn" onClick={addExp}
             style={{width:"100%",background:by?aC:"var(--surf2)",color:by?"#fff":"var(--muted)",border:"none",borderRadius:20,padding:"20px 0",fontSize:18,fontWeight:800,cursor:"pointer",transition:"background .2s,box-shadow .2s",boxShadow:by?`0 8px 32px ${aHex}50`:"none",marginBottom:8}}>
@@ -659,13 +869,21 @@ function App() {
       ══════════════════════════════════════════════════════ */}
       {tab==="week" && (
         <div key="week" className="tab-anim" style={S.page}>
-          <div style={S.title}>This week</div>
-          <div style={{fontSize:14,color:"var(--muted)",marginBottom:24}}>
-            {shortDate(thisW)} — {shortDate(new Date(new Date(thisW).getTime()+6*86400000).toISOString())}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+            <button onClick={()=>setViewWeekOffset(viewWeekOffset-1)} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>‹</button>
+            <div style={{...S.title,marginBottom:0,textAlign:"center"}}>{viewWeekOffset===0?"This week":"Week"}</div>
+            <button onClick={()=>setViewWeekOffset(viewWeekOffset+1)} disabled={viewWeekOffset>=0} style={{background:"none",border:"none",cursor:"pointer",color:viewWeekOffset>=0?"var(--border)":"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>›</button>
           </div>
+          <div style={{fontSize:14,color:"var(--muted)",marginBottom:8,textAlign:"center"}}>
+            {shortDate(viewW)} — {shortDate(new Date(new Date(viewW).getTime()+6*86400000).toISOString())}
+          </div>
+          {viewWeekOffset!==0 && <div style={{textAlign:"center",marginBottom:16}}>
+            <button onClick={()=>setViewWeekOffset(0)} style={{background:"var(--surf2)",border:"none",borderRadius:99,padding:"6px 14px",fontSize:12,fontWeight:700,color:"var(--p1)",cursor:"pointer"}}>Back to this week</button>
+          </div>}
+          {viewWeekOffset===0 && <div style={{marginBottom:16}}/>}
 
           {/* Thursday: last week tally */}
-          {isThur&&lastWExps.length>0&&(
+          {viewWeekOffset===0&&isThur&&lastWExps.length>0&&(
             <div style={{background:"#EEF0FF",border:"1.5px solid #C7CCFA",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:700,color:"#4B4FC4",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
@@ -680,7 +898,7 @@ function App() {
           <div style={{...S.card,padding:20,marginBottom:14}}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
               {[["p1",names.p1,"var(--p1)","#2F6FED"],["p2",names.p2,"var(--p2)","#8A3FEF"]].map(([k,label,cv,hex])=>{
-                const paid=thisWExps.filter(e=>e.by===k).reduce((a,e)=>a+e.amt,0);
+                const paid=viewWExps.filter(e=>e.by===k).reduce((a,e)=>a+e.amt,0);
                 return (
                   <div key={k} style={{background:`${hex}14`,borderRadius:14,padding:"14px 16px"}}>
                     <div style={{fontSize:11,fontWeight:700,color:cv,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{label}</div>
@@ -691,19 +909,38 @@ function App() {
               })}
             </div>
             <div style={{fontSize:13,color:"var(--muted)",marginBottom:14}}>
-              {thisWExps.length} purchase{thisWExps.length!==1?"s":""} · total {nzd(thisWExps.reduce((a,e)=>a+e.amt,0))}
+              {viewWExps.length} purchase{viewWExps.length!==1?"s":""} · total {nzd(viewWExps.reduce((a,e)=>a+e.amt,0))}
             </div>
             <div style={{borderTop:"1px solid var(--border)",paddingTop:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:14,color:"var(--muted)",fontWeight:600}}>{Math.abs(weekBal)<0.01?"All square this week":balLabel(weekBal)}</div>
-              <div style={{fontSize:26,fontWeight:800,color:Math.abs(weekBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(weekBal)<0.01?"✓":nzd(weekBal)}</div>
+              <div style={{fontSize:14,color:"var(--muted)",fontWeight:600}}>{Math.abs(viewWBal)<0.01?"All square this week":balLabel(viewWBal)}</div>
+              <div style={{fontSize:26,fontWeight:800,color:Math.abs(viewWBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(viewWBal)<0.01?"✓":nzd(viewWBal)}</div>
             </div>
           </div>
 
+          {/* Weekly savings snapshot */}
+          {(income.p1 || income.p2) && (()=>{
+            const weeklyIncome = (income.p1?weeklyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?weeklyEquiv(income.p2.amt,income.p2.freq):0);
+            const weeklySpent  = viewWExps.reduce((a,e)=>a+e.amt,0);
+            const weeklyNet    = weeklyIncome - weeklySpent;
+            return (
+              <div style={{...S.card,padding:"16px 20px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>Income this week</div>
+                  <div style={{fontSize:20,fontWeight:800,color:"var(--text)"}}>{nzd(weeklyIncome)}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>{weeklyNet>=0?"Left over":"Overspent"}</div>
+                  <div style={{fontSize:20,fontWeight:800,color:weeklyNet>=0?"var(--green)":"var(--red)"}}>{nzd(weeklyNet)}</div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Category breakdown */}
-          {catTotals(thisWExps).length>0&&(<>
+          {catTotals(viewWExps).length>0&&(<>
             <span style={{...S.lbl,marginTop:8}}>By category</span>
             <div style={{...S.card,padding:"6px 0",marginBottom:14}}>
-              {(()=>{const cts=catTotals(thisWExps);const max=cts[0]?.total||1;return cts.map(c=>(
+              {(()=>{const cts=catTotals(viewWExps);const max=cts[0]?.total||1;return cts.map(c=>(
                 <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:"1px solid var(--border)"}}>
                   <span style={{fontSize:18,flexShrink:0}}>{c.emoji}</span>
                   <div style={{flex:1,minWidth:0}}>
@@ -721,10 +958,10 @@ function App() {
           </>)}
 
           {/* Settlements this week */}
-          {thisWSettl.length>0&&(<>
+          {viewWSettl.length>0&&(<>
             <span style={{...S.lbl,marginTop:8}}>Settlements</span>
             <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-              {thisWSettl.map(s=>(
+              {viewWSettl.map(s=>(
                 <div key={s.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
                   <div style={{width:40,height:40,borderRadius:12,background:"#E7F7EF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✓</div>
                   <div style={{flex:1,minWidth:0}}>
@@ -738,29 +975,30 @@ function App() {
           </>)}
 
           {/* Purchase list */}
-          <span style={{...S.lbl,marginTop:8}}>Purchases</span>
-          {thisWExps.length===0
+          <span style={{...S.lbl,marginTop:8}}>Purchases <span style={{textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11}}>(tap to edit)</span></span>
+          {viewWExps.length===0
             ?<div style={{textAlign:"center",padding:"50px 20px",color:"var(--muted)"}}>
                <div style={{fontSize:44,marginBottom:12}}>🧾</div>
-               <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing yet</div>
-               <div style={{fontSize:13}}>Add your first expense from the Add tab</div>
+               <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing here</div>
+               <div style={{fontSize:13}}>{viewWeekOffset===0?"Add your first expense from the Add tab":"No purchases recorded this week"}</div>
              </div>
             :<div style={{...S.card,overflow:"hidden"}}>
-               {thisWExps.map(exp=>{
+               {viewWExps.map(exp=>{
                  const c=catById(exp.category||"other");
                  return (
-                   <div key={exp.id} className="row" style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12}}>
+                   <div key={exp.id} className="row" onClick={()=>startEdit(exp)} style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12,cursor:"pointer"}}>
                      <div style={{width:40,height:40,borderRadius:12,flexShrink:0,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{c.emoji}</div>
                      <div style={{flex:1,minWidth:0}}>
                        <div style={{fontSize:15,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.where}</div>
                        <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
                          {exp.by==="p1"?names.p1:names.p2} · {shortDate(exp.ts)}
                          {exp.frequency&&exp.frequency!=="once"&&<span style={{marginLeft:6,color:c.color,fontWeight:600}}>↻ {exp.frequency}</span>}
+                         {exp.unexpected&&<span style={{marginLeft:6,color:"var(--amber)",fontWeight:700}}>⚠️ unexpected</span>}
                        </div>
                        {exp.note&&<div style={{fontSize:12,color:"var(--muted)",marginTop:3,fontStyle:"italic"}}>"{exp.note}"</div>}
                      </div>
                      <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
-                     <button onClick={()=>setModal({type:"delete",id:exp.id})} style={{background:"none",border:"none",cursor:"pointer",color:"#C6C3B8",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
+                     <button onClick={e=>{e.stopPropagation();setModal({type:"delete",id:exp.id});}} style={{background:"none",border:"none",cursor:"pointer",color:"#C6C3B8",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
                    </div>
                  );
                })}
@@ -781,6 +1019,70 @@ function App() {
             <div style={{...S.title,marginBottom:0,textAlign:"center"}}>{moLabel(budgetMo)}</div>
             <button onClick={()=>setBudgetMo(nextMo(budgetMo))} disabled={budgetMo>=curMo()} style={{background:"none",border:"none",cursor:"pointer",color:budgetMo>=curMo()?"var(--border)":"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>›</button>
           </div>
+
+          {/* Income & Savings */}
+          {(()=>{
+            const totalIncomeMo = (income.p1?monthlyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?monthlyEquiv(income.p2.amt,income.p2.freq):0);
+            const totalSpentMo  = bmoExps.reduce((a,e)=>a+e.amt,0);
+            const net = totalIncomeMo - totalSpentMo;
+            const hasIncome = income.p1 || income.p2;
+            const unexpectedSpentMo = bmoExps.filter(e=>e.unexpected).reduce((a,e)=>a+e.amt,0);
+            const bufferTarget = buffer?.amt || 0;
+            const bufferRemaining = bufferTarget - unexpectedSpentMo;
+            return (
+              <div style={{...S.card,padding:20,marginBottom:14}}>
+                <div style={{fontSize:13,fontWeight:700,color:"var(--muted)",marginBottom:14}}>Income & Savings</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+                  {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>{
+                    const inc = income[k];
+                    return (
+                      <button key={k} onClick={()=>{setDraftIncome(inc?{amt:String(inc.amt),freq:inc.freq}:{amt:"",freq:"monthly"});setModal({type:"income",who:k});}}
+                        style={{textAlign:"left",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer"}}>
+                        <div style={{fontSize:11,fontWeight:700,color:cv,textTransform:"uppercase",letterSpacing:".06em",marginBottom:5}}>{label}</div>
+                        {inc
+                          ? <><div style={{fontSize:18,fontWeight:800,color:"var(--text)"}}>{nzd(inc.amt)}</div>
+                              <div style={{fontSize:11,color:"var(--muted)",marginTop:1}}>per {inc.freq==="fortnightly"?"fortnight":inc.freq.replace("ly","")}</div>
+                            </>
+                          : <div style={{fontSize:13,color:"var(--muted)",marginTop:2}}>Tap to add income</div>
+                        }
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Unexpected buffer row */}
+                <button onClick={()=>{setDraftBuffer(buffer?String(buffer.amt):"");setModal({type:"buffer"});}}
+                  style={{width:"100%",textAlign:"left",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer",marginBottom:hasIncome?16:0}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:bufferTarget>0?6:0}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"var(--amber)",textTransform:"uppercase",letterSpacing:".06em"}}>⚠️ Unexpected buffer</span>
+                    {bufferTarget>0&&<span style={{fontSize:12,fontWeight:700,color:bufferRemaining>=0?"var(--green)":"var(--red)"}}>{bufferRemaining>=0?`${nzd(bufferRemaining)} left`:`${nzd(bufferRemaining)} over`}</span>}
+                  </div>
+                  {bufferTarget>0
+                    ? <>
+                        <div style={{background:"var(--border)",borderRadius:99,height:5,marginBottom:4}}>
+                          <div style={{background:bufferRemaining>=0?"var(--green)":"var(--red)",borderRadius:99,height:5,width:`${Math.min((unexpectedSpentMo/bufferTarget)*100,100)}%`,transition:"width .4s"}}/>
+                        </div>
+                        <div style={{fontSize:11,color:"var(--muted)"}}>{nzd(unexpectedSpentMo)} spent of {nzd(bufferTarget)} target</div>
+                      </>
+                    : <div style={{fontSize:13,color:"var(--muted)"}}>Tap to set a monthly target</div>
+                  }
+                </button>
+
+                {hasIncome && <>
+                  <div style={{borderTop:"1px solid var(--border)",paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                    <div>
+                      <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>Income this month</div>
+                      <div style={{fontSize:20,fontWeight:800,color:"var(--text)"}}>{nzd(totalIncomeMo)}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>{net>=0?"Left over":"Overspent"}</div>
+                      <div style={{fontSize:20,fontWeight:800,color:net>=0?"var(--green)":"var(--red)"}}>{nzd(net)}</div>
+                    </div>
+                  </div>
+                </>}
+              </div>
+            );
+          })()}
 
           {/* Monthly overview */}
           {(()=>{
@@ -858,13 +1160,32 @@ function App() {
             const yrExps = exps.filter(e=>yearOf(e.ts)===yr);
             const yrTotal = yrExps.reduce((a,e)=>a+e.amt,0);
             if (yrExps.length===0) return null;
+            const totalIncomeMonthly = (income.p1?monthlyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?monthlyEquiv(income.p2.amt,income.p2.freq):0);
+            const hasIncome = income.p1 || income.p2;
+            const monthsElapsed = yr===curMo().slice(0,4) ? (new Date().getMonth()+1) : 12;
+            const yrIncome = totalIncomeMonthly*monthsElapsed;
+            const yrSavings = yrIncome - yrTotal;
             return (
-              <div style={{...S.card,padding:"16px 20px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>{yr} total so far</div>
-                  <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{yrExps.length} purchases this year</div>
+              <div style={{...S.card,padding:"16px 20px",marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>{yr} total so far</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{yrExps.length} purchases this year</div>
+                  </div>
+                  <div style={{fontSize:24,fontWeight:800,color:"var(--text)"}}>{nzd(yrTotal)}</div>
                 </div>
-                <div style={{fontSize:24,fontWeight:800,color:"var(--text)"}}>{nzd(yrTotal)}</div>
+                {hasIncome && <>
+                  <div style={{borderTop:"1px solid var(--border)",marginTop:14,paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>Income {yr}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:"var(--text)",marginTop:2}}>{nzd(yrIncome)}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>{yrSavings>=0?"Saved":"Overspent"}</div>
+                      <div style={{fontSize:16,fontWeight:800,color:yrSavings>=0?"var(--green)":"var(--red)",marginTop:2}}>{nzd(yrSavings)}</div>
+                    </div>
+                  </div>
+                </>}
               </div>
             );
           })()}

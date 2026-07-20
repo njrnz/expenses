@@ -982,7 +982,8 @@ function App() {
 
           {/* Weekly savings snapshot */}
           {(()=>{
-            const r1 = incomeAt(income,"p1",viewW), r2 = incomeAt(income,"p2",viewW);
+            const weekEnd = new Date(new Date(viewW).getTime()+7*86400000-1).toISOString();
+            const r1 = incomeAt(income,"p1",weekEnd), r2 = incomeAt(income,"p2",weekEnd);
             const weeklyRegular = (r1?weeklyEquiv(r1.amt,r1.freq):0) + (r2?weeklyEquiv(r2.amt,r2.freq):0);
             const weeklySide    = sideIncome.filter(s=>s.week===viewW).reduce((a,s)=>a+s.amt,0);
             const weeklyIncome  = weeklyRegular + weeklySide;
@@ -1107,8 +1108,8 @@ function App() {
 
           {/* Income & Savings */}
           {(()=>{
-            const monthStart = `${budgetMo}-01`;
-            const r1 = incomeAt(income,"p1",monthStart), r2 = incomeAt(income,"p2",monthStart);
+            const monthEnd = `${budgetMo}-32`;
+            const r1 = incomeAt(income,"p1",monthEnd), r2 = incomeAt(income,"p2",monthEnd);
             const nowR1 = incomeAt(income,"p1",new Date().toISOString()), nowR2 = incomeAt(income,"p2",new Date().toISOString());
             const sideIncomeMo = sideIncome.filter(s=>s.ts.startsWith(budgetMo)).reduce((a,s)=>a+s.amt,0);
             const totalIncomeMo = (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0) + sideIncomeMo;
@@ -1261,7 +1262,7 @@ function App() {
             const monthsElapsed = yr===curMo().slice(0,4) ? (new Date().getMonth()+1) : 12;
             let yrRegularIncome = 0;
             for (let m=1; m<=monthsElapsed; m++) {
-              const moStr = `${yr}-${String(m).padStart(2,"0")}-01`;
+              const moStr = `${yr}-${String(m).padStart(2,"0")}-32`;
               const r1 = incomeAt(income,"p1",moStr), r2 = incomeAt(income,"p2",moStr);
               yrRegularIncome += (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0);
             }

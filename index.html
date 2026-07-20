@@ -140,6 +140,16 @@ const getSettleBal = ss => ss.reduce((a,s)=>a+(s.from==="p2"?-s.amt:s.amt),0);
 const pct      = (spent,budget) => budget>0 ? Math.min(Math.round((spent/budget)*100),100) : 0;
 const monthlyEquiv = (amt,freq) => freq==="weekly"?amt*(52/12):freq==="fortnightly"?amt*(26/12):amt;
 const weeklyEquiv  = (amt,freq) => freq==="monthly"?amt*(12/52):freq==="fortnightly"?amt/2:amt;
+// Income history: supports old single-object format (treated as always-applicable) and new dated-array format
+const incomeHist = (income,who) => {
+  const v = income[who];
+  if (!v) return [];
+  return Array.isArray(v) ? v : [{...v, from:"2000-01-01T00:00:00.000Z"}];
+};
+const incomeAt = (income,who,dateISO) => {
+  const hist = incomeHist(income,who).filter(r=>r.from<=dateISO).sort((a,b)=>b.from.localeCompare(a.from));
+  return hist[0] || null;
+};
 const barColor = p => p>=100?"var(--red)":p>=80?"var(--amber)":"var(--green)";
 
 // ═══════════════════════════════════════════════════════════════
@@ -220,6 +230,7 @@ function App() {
   const [budgets,     setBudgets]    = useState({});
   const [income,      setIncome]     = useState({});
   const [buffer,      setBuffer]     = useState(null);
+  const [sideIncome,  setSideIncome] = useState([]);
   const [loading,     setLoading]    = useState(true);
   const [syncing,     setSyncing]    = useState(false);
 
@@ -247,6 +258,7 @@ function App() {
   const [draftIncome,  setDraftIncome]= useState({amt:"",freq:"monthly"});
   const [draftBuffer,  setDraftBuffer]= useState("");
   const [editDraft,    setEditDraft]  = useState(null);
+  const [draftSide,    setDraftSide]  = useState({by:"p1",amt:"",note:""});
   const [draftSettle, setDraftSettle]= useState("");
 
   const amtRef   = useRef(null);
@@ -264,14 +276,15 @@ function App() {
       if (d.budgets) setBudgets(d.budgets);
       if (d.income)  setIncome(d.income);
       if (d.buffer)  setBuffer(d.buffer);
+      if (d.sideIncome) setSideIncome(d.sideIncome);
       setLoading(false); setSyncing(false);
     }, () => setLoading(false));
     return () => ref.off();
   }, [user]);
 
-  const persist = useCallback(async (e, n, b, s, inc, buf) => {
+  const persist = useCallback(async (e, n, b, s, inc, buf, side) => {
     setSyncing(true);
-    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s, income:inc, buffer:buf }); }
+    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s, income:inc, buffer:buf, sideIncome:side }); }
     catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
   }, []);
 
@@ -301,6 +314,7 @@ function App() {
   const viewW     = weekOf(new Date(Date.now() + viewWeekOffset*7*86400000));
   const viewWExps = exps.filter(e=>e.week===viewW);
   const viewWSettl= settlements.filter(s=>s.week===viewW);
+  const viewWSide = sideIncome.filter(s=>s.week===viewW);
   const viewWBal  = getBal(splittable(viewWExps));
   const bmoExps   = moExps(exps, budgetMo);
   const lastMoExp = moExps(exps, prevMo(budgetMo));
@@ -329,7 +343,7 @@ function App() {
   const recurringItems = useMemo(()=>{
     const seen={};
     exps.filter(e=>e.frequency&&e.frequency!=="once").forEach(e=>{
-      const k=`${e.category||"other"}|${e.where}|${e.frequency}`;
+      const k=`${e.category||"other"}|${e.where}|${e.frequency}|${e.by}`;
       if(!seen[k]||e.ts>seen[k].ts) seen[k]=e;
     });
     return Object.values(seen).map(e=>({
@@ -346,12 +360,12 @@ function App() {
     const ne=[exp,...exps];
     setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setWFocus(false); setUnexpected(false);
     toast_(`${nzd(v)} added ✓`);
-    await persist(ne,names,budgets,settlements,income,buffer);
+    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
   }
 
   async function delExp(id) {
     const ne=exps.filter(e=>e.id!==id); setModal(null);
-    await persist(ne,names,budgets,settlements,income,buffer);
+    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
   }
 
   function startEdit(exp) {
@@ -371,13 +385,13 @@ function App() {
       : e
     );
     setModal(null); toast_("Expense updated ✓");
-    await persist(ne,names,budgets,settlements,income,buffer);
+    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
   }
 
   async function saveNames() {
     const nn={p1:draftNames.p1.trim()||names.p1, p2:draftNames.p2.trim()||names.p2};
     setModal(null); toast_("Names saved ✓");
-    await persist(exps,nn,budgets,settlements,income,buffer);
+    await persist(exps,nn,budgets,settlements,income,buffer,sideIncome);
   }
 
   function exportCSV() {
@@ -410,22 +424,37 @@ function App() {
     const v=parseFloat(draftBudget);
     if(!v||v<=0){setModal(null);return;}
     const nb={...budgets,[catId]:v}; setBudgets(nb); setModal(null); toast_("Budget saved ✓");
-    await persist(exps,names,nb,settlements,income,buffer);
+    await persist(exps,names,nb,settlements,income,buffer,sideIncome);
   }
 
   async function saveIncome(who) {
     const v=parseFloat(draftIncome.amt);
     if(!v||v<=0){setModal(null);return;}
-    const ni={...income,[who]:{amt:v,freq:draftIncome.freq}};
-    setIncome(ni); setModal(null); toast_("Income saved ✓");
-    await persist(exps,names,budgets,settlements,ni,buffer);
+    const hist = incomeHist(income,who);
+    const ni={...income,[who]:[...hist,{amt:v,freq:draftIncome.freq,from:new Date().toISOString()}]};
+    setIncome(ni); setModal(null); toast_("Income updated ✓");
+    await persist(exps,names,budgets,settlements,ni,buffer,sideIncome);
   }
 
   async function saveBuffer() {
     const v=parseFloat(draftBuffer);
     if(!v||v<=0){setModal(null);return;}
     const nbuf={amt:v}; setBuffer(nbuf); setModal(null); toast_("Buffer target saved ✓");
-    await persist(exps,names,budgets,settlements,income,nbuf);
+    await persist(exps,names,budgets,settlements,income,nbuf,sideIncome);
+  }
+
+  async function addSideIncome() {
+    const v=parseFloat(draftSide.amt);
+    if(!v||v<=0) return toast_("Enter a valid amount",true);
+    const entry={id:String(Date.now()),ts:new Date().toISOString(),amt:v,by:draftSide.by,note:draftSide.note.trim()||null,week:weekOf()};
+    const ns=[entry,...sideIncome];
+    setSideIncome(ns); setModal(null); toast_(`${nzd(v)} side hustle logged ✓`);
+    await persist(exps,names,budgets,settlements,income,buffer,ns);
+  }
+
+  async function delSideIncome(id) {
+    const ns=sideIncome.filter(s=>s.id!==id); setModal(null);
+    await persist(exps,names,budgets,settlements,income,buffer,ns);
   }
 
   async function settleUp() {
@@ -436,7 +465,7 @@ function App() {
     const s={id:String(Date.now()),ts:new Date().toISOString(),amt:v,from:debtor,to:creditor,week:thisW};
     const ns=[s,...settlements];
     setModal(null); toast_(`Settled up ${nzd(v)} ✓`);
-    await persist(exps,names,budgets,ns,income,buffer);
+    await persist(exps,names,budgets,ns,income,buffer,sideIncome);
   }
 
   // ── Shared style constants ────────────────────────────────────
@@ -481,7 +510,7 @@ function App() {
             <div style={{fontSize:14,color:"var(--muted)",marginBottom:24}}>This can't be undone.</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <button onClick={()=>setModal(null)} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer",color:"var(--text)"}}>Cancel</button>
-              <button onClick={()=>delExp(modal.id)} style={{padding:16,background:"var(--red)",color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer"}}>Delete</button>
+              <button onClick={()=>modal.kind==="side"?delSideIncome(modal.id):delExp(modal.id)} style={{padding:16,background:"var(--red)",color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer"}}>Delete</button>
             </div>
           </div>
         </div>
@@ -602,7 +631,7 @@ function App() {
                   style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
               </div>
               <div style={{display:"grid",gridTemplateColumns:budgets[modal.catId]?"1fr 1fr":"1fr",gap:10}}>
-                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements,income,buffer);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements,income,buffer,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
                 <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save budget</button>
               </div>
             </div>
@@ -620,7 +649,7 @@ function App() {
             <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
               <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
               <div style={{fontSize:20,fontWeight:800,marginBottom:4,color:cv}}>{label}'s income</div>
-              <div style={{fontSize:13,color:"var(--muted)",marginBottom:20}}>Used to calculate what's left after expenses.</div>
+              <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>Changes apply from today onward — past weeks and months keep whatever rate was true at the time.</div>
               <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:14,border:"2px solid var(--border)"}}>
                 <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
                 <input type="text" inputMode="decimal" placeholder="0.00" value={draftIncome.amt} onChange={e=>setDraftIncome({...draftIncome,amt:e.target.value.replace(/[^0-9.]/g,"")})} autoFocus
@@ -635,13 +664,47 @@ function App() {
                 ))}
               </div>
               <div style={{display:"grid",gridTemplateColumns:income[who]?"1fr 1fr":"1fr",gap:10}}>
-                {income[who] && <button onClick={()=>{const ni={...income};delete ni[who];setIncome(ni);persist(exps,names,budgets,settlements,ni,buffer);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+                {income[who] && <button onClick={()=>{const ni={...income};delete ni[who];setIncome(ni);persist(exps,names,budgets,settlements,ni,buffer,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
                 <button onClick={()=>saveIncome(who)} style={{padding:16,background:cv,color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save income</button>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {/* ── MODAL: Log side hustle income ── */}
+      {modal?.type==="sideIncome" && (
+        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
+            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
+            <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>💪 Side hustle income</div>
+            <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>Log a one-off payment — freelance work, selling something, whatever comes in.</div>
+
+            <span style={{...S.lbl,marginBottom:8}}>Who earned it?</span>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+              {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>(
+                <button key={k} onClick={()=>setDraftSide({...draftSide,by:k})}
+                  style={{padding:"14px 10px",background:draftSide.by===k?cv:"var(--surf2)",color:draftSide.by===k?"#fff":"var(--text)",border:"none",borderRadius:14,cursor:"pointer",fontSize:16,fontWeight:700}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <span style={{...S.lbl,marginBottom:8}}>Amount</span>
+            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:16,border:"2px solid var(--green)"}}>
+              <span style={{fontSize:26,color:"var(--green)",fontWeight:300}}>$</span>
+              <input type="text" inputMode="decimal" placeholder="0.00" value={draftSide.amt} onChange={e=>setDraftSide({...draftSide,amt:e.target.value.replace(/[^0-9.]/g,"")})} autoFocus
+                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--green)",letterSpacing:"-1px"}}/>
+            </div>
+
+            <span style={{...S.lbl,marginBottom:8}}>What was it? <span style={S.opt}>(optional)</span></span>
+            <input type="text" placeholder="Etsy sale, freelance design, mowing lawns…" value={draftSide.note} onChange={e=>setDraftSide({...draftSide,note:e.target.value})}
+              style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:15,marginBottom:20,color:"var(--text)"}}/>
+
+            <button onClick={addSideIncome} style={{width:"100%",background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Log income</button>
+          </div>
+        </div>
+      )}
 
       {/* ── MODAL: Set unexpected buffer target ── */}
       {modal?.type==="buffer" && (
@@ -656,7 +719,7 @@ function App() {
                 style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
             </div>
             <div style={{display:"grid",gridTemplateColumns:buffer?"1fr 1fr":"1fr",gap:10}}>
-              {buffer && <button onClick={()=>{setBuffer(null);persist(exps,names,budgets,settlements,income,null);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
+              {buffer && <button onClick={()=>{setBuffer(null);persist(exps,names,budgets,settlements,income,null,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
               <button onClick={saveBuffer} style={{padding:16,background:"var(--amber)",color:"#1A1A1F",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save target</button>
             </div>
           </div>
@@ -918,8 +981,12 @@ function App() {
           </div>
 
           {/* Weekly savings snapshot */}
-          {(income.p1 || income.p2) && (()=>{
-            const weeklyIncome = (income.p1?weeklyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?weeklyEquiv(income.p2.amt,income.p2.freq):0);
+          {(()=>{
+            const r1 = incomeAt(income,"p1",viewW), r2 = incomeAt(income,"p2",viewW);
+            const weeklyRegular = (r1?weeklyEquiv(r1.amt,r1.freq):0) + (r2?weeklyEquiv(r2.amt,r2.freq):0);
+            const weeklySide    = sideIncome.filter(s=>s.week===viewW).reduce((a,s)=>a+s.amt,0);
+            const weeklyIncome  = weeklyRegular + weeklySide;
+            if (weeklyIncome===0) return null;
             const weeklySpent  = viewWExps.reduce((a,e)=>a+e.amt,0);
             const weeklyNet    = weeklyIncome - weeklySpent;
             return (
@@ -927,6 +994,7 @@ function App() {
                 <div>
                   <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>Income this week</div>
                   <div style={{fontSize:20,fontWeight:800,color:"var(--text)"}}>{nzd(weeklyIncome)}</div>
+                  {weeklySide>0&&<div style={{fontSize:11,color:"var(--green)",marginTop:1,fontWeight:600}}>incl. {nzd(weeklySide)} side hustle</div>}
                 </div>
                 <div style={{textAlign:"right"}}>
                   <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>{weeklyNet>=0?"Left over":"Overspent"}</div>
@@ -969,6 +1037,23 @@ function App() {
                     <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.from==="p1"?names.p1:names.p2} → {s.to==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
                   </div>
                   <div style={{fontSize:17,fontWeight:800,color:"var(--green)",flexShrink:0}}>{nzd(s.amt)}</div>
+                </div>
+              ))}
+            </div>
+          </>)}
+
+          {/* Side hustle income this week */}
+          {viewWSide.length>0&&(<>
+            <span style={{...S.lbl,marginTop:8}}>💪 Side hustle income</span>
+            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
+              {viewWSide.map(s=>(
+                <div key={s.id} className="row" onClick={()=>setModal({type:"delete",id:s.id,kind:"side"})} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)",cursor:"pointer"}}>
+                  <div style={{width:40,height:40,borderRadius:12,background:"#E7F7EF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>💪</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:15,fontWeight:600,color:"var(--text)"}}>{s.note||"Side hustle"}</div>
+                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.by==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
+                  </div>
+                  <div style={{fontSize:17,fontWeight:800,color:"var(--green)",flexShrink:0}}>+{nzd(s.amt)}</div>
                 </div>
               ))}
             </div>
@@ -1022,19 +1107,22 @@ function App() {
 
           {/* Income & Savings */}
           {(()=>{
-            const totalIncomeMo = (income.p1?monthlyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?monthlyEquiv(income.p2.amt,income.p2.freq):0);
+            const monthStart = `${budgetMo}-01`;
+            const r1 = incomeAt(income,"p1",monthStart), r2 = incomeAt(income,"p2",monthStart);
+            const nowR1 = incomeAt(income,"p1",new Date().toISOString()), nowR2 = incomeAt(income,"p2",new Date().toISOString());
+            const sideIncomeMo = sideIncome.filter(s=>s.ts.startsWith(budgetMo)).reduce((a,s)=>a+s.amt,0);
+            const totalIncomeMo = (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0) + sideIncomeMo;
             const totalSpentMo  = bmoExps.reduce((a,e)=>a+e.amt,0);
             const net = totalIncomeMo - totalSpentMo;
-            const hasIncome = income.p1 || income.p2;
+            const hasIncome = incomeHist(income,"p1").length>0 || incomeHist(income,"p2").length>0 || sideIncome.length>0;
             const unexpectedSpentMo = bmoExps.filter(e=>e.unexpected).reduce((a,e)=>a+e.amt,0);
             const bufferTarget = buffer?.amt || 0;
             const bufferRemaining = bufferTarget - unexpectedSpentMo;
             return (
               <div style={{...S.card,padding:20,marginBottom:14}}>
                 <div style={{fontSize:13,fontWeight:700,color:"var(--muted)",marginBottom:14}}>Income & Savings</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-                  {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>{
-                    const inc = income[k];
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  {[["p1",names.p1,"var(--p1)",nowR1],["p2",names.p2,"var(--p2)",nowR2]].map(([k,label,cv,inc])=>{
                     return (
                       <button key={k} onClick={()=>{setDraftIncome(inc?{amt:String(inc.amt),freq:inc.freq}:{amt:"",freq:"monthly"});setModal({type:"income",who:k});}}
                         style={{textAlign:"left",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer"}}>
@@ -1049,6 +1137,16 @@ function App() {
                     );
                   })}
                 </div>
+
+                {/* Side hustle row */}
+                <button onClick={()=>{setDraftSide({by:"p1",amt:"",note:""});setModal({type:"sideIncome"});}}
+                  style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer",marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:700,color:"var(--green)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>💪 Side hustle</div>
+                    <div style={{fontSize:13,color:"var(--muted)"}}>{sideIncomeMo>0?`${nzd(sideIncomeMo)} this month`:"Tap to log income"}</div>
+                  </div>
+                  <span style={{fontSize:20,color:"var(--green)",fontWeight:300}}>＋</span>
+                </button>
 
                 {/* Unexpected buffer row */}
                 <button onClick={()=>{setDraftBuffer(buffer?String(buffer.amt):"");setModal({type:"buffer"});}}
@@ -1160,10 +1258,16 @@ function App() {
             const yrExps = exps.filter(e=>yearOf(e.ts)===yr);
             const yrTotal = yrExps.reduce((a,e)=>a+e.amt,0);
             if (yrExps.length===0) return null;
-            const totalIncomeMonthly = (income.p1?monthlyEquiv(income.p1.amt,income.p1.freq):0) + (income.p2?monthlyEquiv(income.p2.amt,income.p2.freq):0);
-            const hasIncome = income.p1 || income.p2;
             const monthsElapsed = yr===curMo().slice(0,4) ? (new Date().getMonth()+1) : 12;
-            const yrIncome = totalIncomeMonthly*monthsElapsed;
+            let yrRegularIncome = 0;
+            for (let m=1; m<=monthsElapsed; m++) {
+              const moStr = `${yr}-${String(m).padStart(2,"0")}-01`;
+              const r1 = incomeAt(income,"p1",moStr), r2 = incomeAt(income,"p2",moStr);
+              yrRegularIncome += (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0);
+            }
+            const yrSideIncome = sideIncome.filter(s=>yearOf(s.ts)===yr).reduce((a,s)=>a+s.amt,0);
+            const yrIncome = yrRegularIncome + yrSideIncome;
+            const hasIncome = incomeHist(income,"p1").length>0 || incomeHist(income,"p2").length>0 || sideIncome.length>0;
             const yrSavings = yrIncome - yrTotal;
             return (
               <div style={{...S.card,padding:"16px 20px",marginBottom:14}}>

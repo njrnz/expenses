@@ -128,6 +128,8 @@ const shortMo = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,
 const moExps  = (exps,m) => exps.filter(e=>e.ts&&e.ts.startsWith(m));
 const last6Months = () => { const out=[]; let m=curMo(); for(let i=0;i<6;i++){out.unshift(m);m=prevMo(m);} return out; };
 const yearOf = iso => iso.slice(0,4);
+const localDateInput = iso => { const d=new Date(iso); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+const dateInputToDate = value => new Date(`${value}T12:00:00`);
 
 const nzd       = n   => new Intl.NumberFormat("en-NZ",{style:"currency",currency:"NZD"}).format(Math.abs(n));
 const shortDate = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"short",month:"short",day:"numeric"});
@@ -246,6 +248,7 @@ function App() {
   const [where, setWhere] = useState("");
   const [note,  setNote]  = useState("");
   const [freq,  setFreq]  = useState("once");
+  const [expenseDate, setExpenseDate] = useState(()=>localDateInput(new Date().toISOString()));
   const [unexpected, setUnexpected] = useState(false);
   const [wFocus,setWFocus]= useState(false);
   const [showRecurring,setShowRecurring]= useState(false);
@@ -356,9 +359,10 @@ function App() {
     if (!by) return toast_("Tap who paid first",true);
     const v=parseFloat(amt);
     if (!v||v<=0) return toast_("Enter a valid amount",true);
-    const exp={id:String(Date.now()),ts:new Date().toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:thisW,category:cat||"other",frequency:freq,note:note.trim()||null,unexpected:unexpected};
+    const enteredDate = dateInputToDate(expenseDate);
+    const exp={id:String(Date.now()),ts:enteredDate.toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:weekOf(enteredDate),category:cat||"other",frequency:freq,note:note.trim()||null,unexpected:unexpected};
     const ne=[exp,...exps];
-    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setWFocus(false); setUnexpected(false);
+    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setExpenseDate(localDateInput(new Date().toISOString())); setWFocus(false); setUnexpected(false);
     toast_(`${nzd(v)} added ✓`);
     await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
   }
@@ -372,7 +376,7 @@ function App() {
     setEditDraft({
       id: exp.id, by: exp.by, amt: String(exp.amt), category: exp.category||"other",
       where: exp.where==="Unspecified"?"":exp.where, note: exp.note||"",
-      frequency: exp.frequency||"once", unexpected: !!exp.unexpected
+      frequency: exp.frequency||"once", unexpected: !!exp.unexpected, date: localDateInput(exp.ts)
     });
     setModal({type:"edit"});
   }
@@ -381,7 +385,7 @@ function App() {
     const v = parseFloat(editDraft.amt);
     if (!v||v<=0) return toast_("Enter a valid amount",true);
     const ne = exps.map(e => e.id===editDraft.id
-      ? {...e, by:editDraft.by, amt:v, category:editDraft.category, where:editDraft.where.trim()||"Unspecified", note:editDraft.note.trim()||null, frequency:editDraft.frequency, unexpected:editDraft.unexpected}
+      ? {...e, by:editDraft.by, amt:v, category:editDraft.category, where:editDraft.where.trim()||"Unspecified", note:editDraft.note.trim()||null, frequency:editDraft.frequency, unexpected:editDraft.unexpected, ts:dateInputToDate(editDraft.date).toISOString(), week:weekOf(dateInputToDate(editDraft.date))}
       : e
     );
     setModal(null); toast_("Expense updated ✓");
@@ -536,11 +540,15 @@ function App() {
               </div>
 
               <span style={{...S.lbl,marginBottom:8}}>Amount</span>
-              <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--surf2)",borderRadius:14,padding:"10px 16px",marginBottom:16,border:`2px solid ${eC}`}}>
-                <span style={{fontSize:22,color:eC,fontWeight:300}}>$</span>
-                <input type="text" inputMode="decimal" value={editDraft.amt} onChange={e=>setEditDraft({...editDraft,amt:e.target.value.replace(/[^0-9.]/g,"")})}
-                  style={{fontSize:26,fontWeight:800,border:"none",background:"none",width:"100%",color:eC}}/>
-              </div>
+             <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--surf2)",borderRadius:14,padding:"10px 16px",marginBottom:16,border:`2px solid ${eC}`}}>
+               <span style={{fontSize:22,color:eC,fontWeight:300}}>$</span>
+               <input type="text" inputMode="decimal" value={editDraft.amt} onChange={e=>setEditDraft({...editDraft,amt:e.target.value.replace(/[^0-9.]/g,"")})}
+                 style={{fontSize:26,fontWeight:800,border:"none",background:"none",width:"100%",color:eC}}/>
+             </div>
+
+             <span style={{...S.lbl,marginBottom:8}}>Date</span>
+             <input type="date" value={editDraft.date} onChange={e=>setEditDraft({...editDraft,date:e.target.value})}
+               style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:16,marginBottom:16,color:"var(--text)"}}/>
 
               <span style={{...S.lbl,marginBottom:8}}>Category</span>
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:16}}>
@@ -854,6 +862,10 @@ function App() {
             <input ref={amtRef} type="text" inputMode="decimal" placeholder="0.00" value={amt} onChange={e=>setAmt(e.target.value.replace(/[^0-9.]/g,""))}
               style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#C6C3B8",transition:"color .2s"}}/>
           </div>
+
+          <span style={S.lbl}>Date</span>
+          <input type="date" value={expenseDate} onChange={e=>setExpenseDate(e.target.value)}
+            style={{width:"100%",background:"var(--surf)",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:16,marginBottom:18,color:"var(--text)"}}/>
 
           {/* Category */}
           <span style={S.lbl}>Category</span>

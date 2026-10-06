@@ -1,1411 +1,2572 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="Expenses">
-  <meta name="theme-color" content="#F2F1EC">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>Expenses</title>
-  <style>
-    :root {
-      --bg:     #F2F1EC;
-      --surf:   #FFFFFF;
-      --surf2:  #EBE9E1;
-      --border: #DDDAD0;
-      --text:   #1A1A1F;
-      --muted:  #6E6E78;
-      --p1:     #2F6FED;
-      --p2:     #8A3FEF;
-      --green:  #15915F;
-      --amber:  #B45309;
-      --red:    #C22B3A;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    html, body { height: 100%; background: var(--bg); }
-    body { font-family: system-ui, -apple-system, sans-serif; color: var(--text); }
-    input, button { font-family: inherit; outline: none; -webkit-appearance: none; }
-    input::placeholder { color: #C6C3B8; }
-    ::-webkit-scrollbar { display: none; }
-
-    @keyframes spin    { to { transform: rotate(360deg); } }
-    @keyframes fadeup  { from { opacity:0;transform:translateY(-8px); } to { opacity:1;transform:translateY(0); } }
-    @keyframes slidein { from { transform:translateY(100%); } to { transform:translateY(0); } }
-    @keyframes pulse   { 0%,100%{opacity:.4} 50%{opacity:1} }
-    @keyframes tabfade { from{opacity:0;transform:translateY(6px);} to{opacity:1;transform:translateY(0);} }
-    @keyframes dropopen { from{opacity:0;transform:translateY(-6px) scaleY(.96);transform-origin:top;} to{opacity:1;transform:translateY(0) scaleY(1);} }
-    @keyframes amtpop  { 0%{opacity:.3;transform:scale(.94);} 60%{transform:scale(1.02);} 100%{opacity:1;transform:scale(1);} }
-    .tab-anim  { animation: tabfade .28s cubic-bezier(.2,.8,.2,1); }
-    .amt-anim  { display:inline-block; animation: amtpop .3s cubic-bezier(.2,.8,.2,1); }
-
-    .row:last-child       { border-bottom: none !important; }
-    .sugg-row:last-child  { border-bottom: none !important; }
-    .sugg-row:active      { background: var(--surf2) !important; }
-    .rec-row:last-child   { border-bottom: none !important; }
-    .rec-row:active       { background: var(--surf2) !important; }
-    .cat-btn:active       { transform: scale(.93); }
-    .btn-name:active      { transform: scale(.97); }
-    .add-btn:active       { transform: scale(.98); }
-    .tab-btn:active       { opacity: .5; }
-    .budget-row:active    { background: var(--surf2) !important; }
-    .quick-card:active    { transform: scale(.96); }
-
-    #boot { display:flex;justify-content:center;align-items:center;height:100vh; }
-    #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #DDDAD0;border-top-color:#2F6FED;animation:spin .7s linear infinite; }
-  </style>
-</head>
-<body>
-<div id="root"><div id="boot"><div class="sp"></div></div></div>
-
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-<script type="text/babel">
-const { useState, useEffect, useCallback, useRef, useMemo } = React;
-
-// ═══════════════════════════════════════════════════════════════
-//  CONFIG
-// ═══════════════════════════════════════════════════════════════
-const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyDSnrvUcXuOvF3f4uR4RLNt_ZunntQaFBA",
-  authDomain:        "nick-puai-expenses.firebaseapp.com",
-  databaseURL:       "https://nick-puai-expenses-default-rtdb.firebaseio.com",
-  projectId:         "nick-puai-expenses",
-  storageBucket:     "nick-puai-expenses.firebasestorage.app",
-  messagingSenderId: "610510764626",
-  appId:             "1:610510764626:web:0b15a873a383667be33d8b"
-};
-const DEFAULT_NAMES = { p1: "Nick", p2: "Puai" };
-
-firebase.initializeApp(FIREBASE_CONFIG);
-const db = firebase.database();
-const auth = firebase.auth();
-auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-
-// ═══════════════════════════════════════════════════════════════
-//  CONSTANTS
-// ═══════════════════════════════════════════════════════════════
-const CATS = [
-  { id:"housing",       label:"Housing",      emoji:"🏠", color:"#8FA3D9", noSplit:true },
-  { id:"groceries",     label:"Groceries",    emoji:"🛒", color:"#34D399" },
-  { id:"dining_fun",    label:"Dining & Fun", emoji:"🎉", color:"#FB923C" },
-  { id:"bills",         label:"Bills",        emoji:"🧾", color:"#60A5FA" },
-  { id:"subscriptions", label:"Subs",         emoji:"📱", color:"#F472B6" },
-  { id:"other",         label:"Other",        emoji:"🏷️", color:"#94A3B8" },
-];
-const FREQS = [
-  { id:"once",       label:"One-off"     },
-  { id:"weekly",     label:"↻ Weekly"    },
-  { id:"fortnightly",label:"↻ Fortnight" },
-  { id:"monthly",    label:"↻ Monthly"   },
-];
-const catById = id => {
-  if (id === "dining" || id === "entertainment") return CATS.find(c => c.id === "dining_fun");
-  if (id === "transport" || id === "health" || id === "shopping") return CATS.find(c => c.id === "other");
-  if (id === "rent") return CATS.find(c => c.id === "housing");
-  if (id === "utilities" || id === "insurance") return CATS.find(c => c.id === "bills");
-  return CATS.find(c => c.id === id) || CATS[CATS.length - 1];
-};
-
-// ═══════════════════════════════════════════════════════════════
-//  UTILITIES
-// ═══════════════════════════════════════════════════════════════
-const weekOf = (d = new Date()) => {
-  const dt = new Date(d); dt.setHours(0,0,0,0);
-  dt.setDate(dt.getDate() - ((dt.getDay()-4+7)%7));
-  return dt.toISOString();
-};
-const curMo   = () => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; };
-const prevMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===1?`${y-1}-12`:`${y}-${String(mo-1).padStart(2,"0")}`; };
-const nextMo  = m => { const [y,mo]=m.split("-").map(Number); return mo===12?`${y+1}-01`:`${y}-${String(mo+1).padStart(2,"0")}`; };
-const moLabel = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,mo-1,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"}); };
-const shortMo = m => { const [y,mo]=m.split("-").map(Number); return new Date(y,mo-1,1).toLocaleDateString("en-NZ",{month:"short"}); };
-const moExps  = (exps,m) => exps.filter(e=>e.ts&&e.ts.startsWith(m));
-const last6Months = () => { const out=[]; let m=curMo(); for(let i=0;i<6;i++){out.unshift(m);m=prevMo(m);} return out; };
-const yearOf = iso => iso.slice(0,4);
-const localDateInput = iso => { const d=new Date(iso); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
-const dateInputToDate = value => new Date(`${value}T12:00:00`);
-
-const nzd       = n   => new Intl.NumberFormat("en-NZ",{style:"currency",currency:"NZD"}).format(Math.abs(n));
-const shortDate = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"short",month:"short",day:"numeric"});
-const longDate  = iso => new Date(iso).toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long"});
-const getBal    = exps => exps.reduce((a,e)=>a+(e.by==="p1"?e.amt/2:-e.amt/2),0);
-const splittable = exps => exps.filter(e => !catById(e.category||"other").noSplit);
-// Settlements: p2 paying p1 reduces positive balance; p1 paying p2 increases it
-const getSettleBal = ss => ss.reduce((a,s)=>a+(s.from==="p2"?-s.amt:s.amt),0);
-
-const pct      = (spent,budget) => budget>0 ? Math.min(Math.round((spent/budget)*100),100) : 0;
-const monthlyEquiv = (amt,freq) => freq==="weekly"?amt*(52/12):freq==="fortnightly"?amt*(26/12):amt;
-const weeklyEquiv  = (amt,freq) => freq==="monthly"?amt*(12/52):freq==="fortnightly"?amt/2:amt;
-// Income history: supports old single-object format (treated as always-applicable) and new dated-array format
-const incomeHist = (income,who) => {
-  const v = income[who];
-  if (!v) return [];
-  return Array.isArray(v) ? v : [{...v, from:"2000-01-01T00:00:00.000Z"}];
-};
-const incomeAt = (income,who,dateISO) => {
-  const hist = incomeHist(income,who).filter(r=>r.from<=dateISO).sort((a,b)=>b.from.localeCompare(a.from));
-  return hist[0] || null;
-};
-const barColor = p => p>=100?"var(--red)":p>=80?"var(--amber)":"var(--green)";
-
-// ═══════════════════════════════════════════════════════════════
-//  LOGIN SCREEN
-// ═══════════════════════════════════════════════════════════════
-function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [pass,  setPass]  = useState("");
-  const [err,   setErr]   = useState("");
-  const [busy,  setBusy]  = useState(false);
-
-  async function doLogin(e) {
-    e.preventDefault();
-    setErr(""); setBusy(true);
-    try {
-      await auth.signInWithEmailAndPassword(email.trim(), pass);
-    } catch (ex) {
-      setBusy(false);
-      if (ex.code === "auth/invalid-credential" || ex.code === "auth/wrong-password" || ex.code === "auth/user-not-found") {
-        setErr("Wrong email or password");
-      } else if (ex.code === "auth/invalid-email") {
-        setErr("That doesn't look like a valid email");
-      } else if (ex.code === "auth/too-many-requests") {
-        setErr("Too many attempts — wait a bit and try again");
-      } else {
-        setErr("Couldn't sign in — check your connection");
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#f5f5f8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Household · Expenses & Plan</title>
+    <style>
+      :root {
+        --bg: #f5f5f8;
+        --paper: #fff;
+        --ink: #202433;
+        --muted: #656b7b;
+        --line: #e4e6ee;
+        --blue: #4358db;
+        --purple: #7854df;
+        --green: #147c5d;
+        --red: #b82f43;
+        --amber: #956017;
       }
-    }
-  }
-
-  return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",padding:24}}>
-      <form onSubmit={doLogin} style={{width:"100%",maxWidth:340}}>
-        <div style={{textAlign:"center",marginBottom:36}}>
-          <div style={{fontSize:44,marginBottom:14}}>🔒</div>
-          <div style={{fontSize:26,fontWeight:800,color:"var(--text)",letterSpacing:"-0.5px"}}>Expenses</div>
-          <div style={{fontSize:14,color:"var(--muted)",marginTop:6}}>Sign in to continue</div>
-        </div>
-
-        <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Email</div>
-        <input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoFocus
-          style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"15px 18px",fontSize:16,marginBottom:14,color:"var(--text)",background:"var(--surf)"}}/>
-
-        <div style={{fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Password</div>
-        <input type="password" autoComplete="current-password" value={pass} onChange={e=>setPass(e.target.value)} placeholder="••••••••"
-          style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"15px 18px",fontSize:16,marginBottom:18,color:"var(--text)",background:"var(--surf)"}}/>
-
-        {err && <div style={{background:"#FCEBEC",border:"1.5px solid #F2C7CC",borderRadius:14,padding:"12px 16px",fontSize:13,color:"var(--red)",marginBottom:18,fontWeight:600}}>{err}</div>}
-
-        <button type="submit" disabled={busy||!email||!pass}
-          style={{width:"100%",background:(busy||!email||!pass)?"var(--surf2)":"var(--p1)",color:(busy||!email||!pass)?"var(--muted)":"#fff",border:"none",borderRadius:18,padding:"17px 0",fontSize:17,fontWeight:800,cursor:(busy||!email||!pass)?"default":"pointer"}}>
-          {busy?"Signing in…":"Sign in"}
-        </button>
-
-        <div style={{fontSize:12,color:"var(--muted)",textAlign:"center",marginTop:20,lineHeight:1.6}}>
-          Stays signed in on this device.<br/>You'll only need to do this once.
-        </div>
-      </form>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.5 system-ui,
+          -apple-system,
+          Segoe UI,
+          sans-serif;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        cursor: wait;
+        opacity: 0.6;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        border-radius: 12px;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: var(--paper);
+        color: var(--ink);
+        padding: 10px 15px;
+        font-weight: 650;
+      }
+      button:hover {
+        border-color: #b6bdd5;
+      }
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid #95a3ff;
+        outline-offset: 3px;
+      }
+      input,
+      select,
+      textarea {
+        border: 1px solid var(--line);
+        padding: 11px 13px;
+        background: #fff;
+        color: var(--ink);
+        width: 100%;
+        min-width: 0;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 6px;
+      }
+      fieldset {
+        border: 0;
+        padding: 0;
+        margin: 0 0 16px;
+        min-width: 0;
+      }
+      legend {
+        font-size: 13px;
+        font-weight: 650;
+        margin-bottom: 7px;
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: auto;
+        padding: 26px 30px 100px;
+      }
+      .brand {
+        font-size: 25px;
+        font-weight: 850;
+        letter-spacing: -1px;
+      }
+      .brand span {
+        color: var(--blue);
+      }
+      .top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 28px;
+      }
+      .top-right {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .shell {
+        display: grid;
+        grid-template-columns: 160px minmax(0, 1fr);
+        gap: 32px;
+      }
+      .nav {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .nav button {
+        border: 0;
+        background: transparent;
+        text-align: left;
+        color: var(--muted);
+        padding: 12px 16px;
+      }
+      .nav button.active {
+        background: #e9ecff;
+        color: var(--blue);
+      }
+      .nav small {
+        display: block;
+        margin: 18px 15px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      .page-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 20px;
+      }
+      h1 {
+        font-size: 30px;
+        letter-spacing: -1px;
+        line-height: 1.15;
+        margin: 0 0 6px;
+      }
+      h2 {
+        font-size: 19px;
+        letter-spacing: -0.4px;
+        margin: 0 0 12px;
+      }
+      p {
+        margin: 0 0 12px;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .small {
+        font-size: 12px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        font-weight: 750;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 7px;
+      }
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 22px;
+        margin-bottom: 16px;
+        box-shadow: 0 7px 25px #20243304;
+      }
+      .columns {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(230px, 1fr);
+        gap: 18px;
+        align-items: start;
+      }
+      .split {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 14px;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .metrics.three {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .metric b {
+        display: block;
+        font-size: 24px;
+        letter-spacing: -0.7px;
+      }
+      .metric small {
+        color: var(--muted);
+      }
+      .primary {
+        background: var(--ink);
+        color: #fff;
+        border-color: var(--ink);
+      }
+      .accent {
+        background: var(--blue);
+        border-color: var(--blue);
+        color: #fff;
+      }
+      .danger {
+        color: var(--red);
+      }
+      .good {
+        color: var(--green);
+      }
+      .warning {
+        color: var(--amber);
+      }
+      .wide {
+        width: 100%;
+      }
+      .people {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 9px;
+      }
+      .people input {
+        position: absolute;
+        opacity: 0;
+        width: 1px;
+      }
+      .people label {
+        margin: 0;
+        padding: 13px;
+        text-align: center;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .people input:checked + label {
+        background: var(--blue);
+        color: #fff;
+        border-color: var(--blue);
+      }
+      .people input[value="p2"]:checked + label {
+        background: var(--purple);
+        border-color: var(--purple);
+      }
+      .people input:focus-visible + label {
+        outline: 3px solid #95a3ff;
+        outline-offset: 3px;
+      }
+      .amount-field {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 2px solid var(--line);
+        margin-bottom: 17px;
+      }
+      .amount-field span {
+        font-size: 27px;
+        color: var(--muted);
+      }
+      .amount-field input {
+        border: 0;
+        font-size: 39px;
+        font-weight: 800;
+        letter-spacing: -1px;
+        padding: 4px 0;
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 13px;
+        margin-bottom: 16px;
+      }
+      .field {
+        margin-bottom: 14px;
+      }
+      .field .hint {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 5px;
+      }
+      .chips {
+        display: flex;
+        gap: 7px;
+        flex-wrap: wrap;
+      }
+      .chips button {
+        font-size: 12px;
+        padding: 8px 10px;
+      }
+      .category-pills {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 7px;
+      }
+      .category-pills label {
+        font-size: 12px;
+        padding: 9px 4px;
+      }
+      .category-pills input:checked + label {
+        background: #eef0ff;
+        color: var(--blue);
+      }
+      details {
+        margin: 12px 0;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 650;
+        font-size: 13px;
+        padding: 8px 0;
+      }
+      .error {
+        background: #fff0f2;
+        color: var(--red);
+        padding: 11px 14px;
+        border-radius: 12px;
+        margin-bottom: 12px;
+      }
+      .error:empty {
+        display: none;
+      }
+      .notice {
+        background: #f0f2ff;
+        padding: 12px 14px;
+        border-radius: 12px;
+        color: #3d4690;
+        font-size: 13px;
+      }
+      .hero {
+        background: linear-gradient(120deg, #303da3, #6c48d7);
+        color: #fff;
+        border: 0;
+      }
+      .hero .eyebrow,
+      .hero .muted {
+        color: #e0e2ff;
+      }
+      .hero .large {
+        font-size: 38px;
+        font-weight: 800;
+        letter-spacing: -1.3px;
+      }
+      .hero .metrics {
+        border-top: 1px solid #ffffff35;
+        margin-top: 16px;
+        padding-top: 15px;
+      }
+      .list-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 13px 0;
+        border-top: 1px solid var(--line);
+      }
+      button.list-row {
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: 0;
+        border-top: 1px solid var(--line);
+        border-radius: 0;
+        font-weight: 400;
+      }
+      button.list-row:hover {
+        background: #f8f8fc;
+      }
+      .grow {
+        flex: 1;
+        min-width: 0;
+      }
+      .grow b {
+        display: block;
+        font-weight: 650;
+        overflow-wrap: anywhere;
+      }
+      .icon {
+        width: 35px;
+        height: 35px;
+        background: #f1f2fa;
+        border-radius: 11px;
+        display: grid;
+        place-items: center;
+        color: var(--blue);
+        font-size: 19px;
+        flex-shrink: 0;
+      }
+      .money {
+        font-weight: 750;
+        white-space: nowrap;
+      }
+      .bar {
+        height: 7px;
+        background: #eceef5;
+        border-radius: 99px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      .bar span {
+        display: block;
+        height: 100%;
+        background: var(--blue);
+        border-radius: 99px;
+      }
+      .day-title {
+        font-size: 12px;
+        color: var(--muted);
+        font-weight: 700;
+        margin: 20px 0 5px;
+      }
+      .empty {
+        text-align: center;
+        padding: 28px 10px;
+        color: var(--muted);
+      }
+      .row-actions {
+        display: flex;
+        gap: 6px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+      .toolbar input {
+        flex: 1;
+      }
+      .toolbar select {
+        width: 160px;
+      }
+      .form-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 17px;
+      }
+      .form-actions button {
+        flex: 1;
+      }
+      .entry-submit {
+        padding: 14px;
+        font-size: 16px;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .check input {
+        width: auto;
+      }
+      .check label {
+        margin: 0;
+      }
+      .pill {
+        font-size: 11px;
+        color: var(--blue);
+        background: #eef0ff;
+        border-radius: 99px;
+        padding: 3px 8px;
+      }
+      dialog {
+        border: 0;
+        border-radius: 23px;
+        background: #fff;
+        color: var(--ink);
+        padding: 0;
+        width: min(540px, calc(100% - 28px));
+        max-height: 90dvh;
+        box-shadow: 0 30px 80px #11152840;
+      }
+      dialog::backdrop {
+        background: #171a2a75;
+      }
+      .dialog-content {
+        padding: 24px;
+        overflow-y: auto;
+        max-height: 90dvh;
+      }
+      .dialog-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 18px;
+      }
+      .dialog-head h2 {
+        margin: 0;
+      }
+      .dialog-head button {
+        padding: 4px 10px;
+        font-size: 21px;
+      }
+      #toast {
+        position: fixed;
+        bottom: 90px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--ink);
+        color: #fff;
+        border-radius: 14px;
+        padding: 12px 17px;
+        max-width: calc(100% - 30px);
+        z-index: 20;
+        box-shadow: 0 5px 25px #20243330;
+        font-size: 13px;
+      }
+      #toast:empty {
+        display: none;
+      }
+      #toast button {
+        background: transparent;
+        border: 0;
+        color: #fff;
+        text-decoration: underline;
+        padding: 0 0 0 14px;
+      }
+      .login {
+        max-width: 380px;
+        margin: 12vh auto;
+      }
+      .login .brand {
+        margin-bottom: 24px;
+      }
+      .version {
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .trend {
+        display: flex;
+        align-items: end;
+        height: 110px;
+        gap: 10px;
+      }
+      .trend button {
+        flex: 1;
+        background: transparent;
+        border: 0;
+        padding: 0;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .trend span {
+        display: block;
+        background: #c8cff6;
+        width: 70%;
+        margin: auto;
+        border-radius: 7px 7px 0 0;
+      }
+      .trend button.active span {
+        background: var(--blue);
+      }
+      .footer-note {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 12px 0;
+      }
+      .breakdown {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+      }
+      .breakdown div {
+        padding: 11px;
+        background: #f7f7fb;
+        border-radius: 12px;
+      }
+      .breakdown b {
+        display: block;
+      }
+      .sticky-save {
+        position: sticky;
+        bottom: 78px;
+        padding-top: 9px;
+        background: #fff;
+      }
+      .intro {
+        font-size: 14px;
+      }
+      .inline-link {
+        border: 0;
+        background: transparent;
+        color: var(--blue);
+        padding: 0;
+        text-decoration: underline;
+      }
+      @media (max-width: 730px) {
+        .wrap {
+          padding: 18px 16px 95px;
+        }
+        .top {
+          margin-bottom: 22px;
+        }
+        .shell {
+          display: block;
+        }
+        .nav {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          z-index: 10;
+          background: #fff;
+          border-top: 1px solid var(--line);
+          flex-direction: row;
+          padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+          justify-content: space-around;
+        }
+        .nav button {
+          flex: 1;
+          text-align: center;
+          font-size: 13px;
+          padding: 10px;
+        }
+        .nav small {
+          display: none;
+        }
+        .columns {
+          grid-template-columns: 1fr;
+        }
+        .card {
+          padding: 18px;
+          border-radius: 18px;
+        }
+        h1 {
+          font-size: 27px;
+        }
+        .brand {
+          font-size: 23px;
+        }
+        .top-right {
+          gap: 8px;
+        }
+        .metrics.three {
+          grid-template-columns: 1fr 1fr;
+        }
+        .metrics.three .metric:first-child {
+          grid-column: 1/-1;
+        }
+        .metric b {
+          font-size: 23px;
+        }
+        .toolbar {
+          flex-wrap: wrap;
+        }
+        .toolbar select {
+          width: 130px;
+        }
+        .breakdown {
+          grid-template-columns: 1fr 1fr;
+        }
+        .hero .large {
+          font-size: 33px;
+        }
+        .page-head {
+          align-items: start;
+        }
+        .sticky-save {
+          bottom: 74px;
+        }
+        .amount-field input {
+          font-size: 36px;
+        }
+        .field {
+          margin-bottom: 12px;
+        }
+        .nav button.active {
+          border-radius: 12px;
+        }
+        .people label {
+          padding: 10px;
+        }
+        .category-pills label {
+          padding: 7px 3px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          scroll-behavior: auto !important;
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="wrap"><p>Loading Household…</p></div>
     </div>
+    <dialog id="dialog"></dialog>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <script>
+/* Household calendar and storage helpers. No network or database side effects. */
+const TZ = "Pacific/Auckland";
+const CATS = [
+  { id: "housing", label: "Housing", icon: "⌂", noSplit: true },
+  { id: "groceries", label: "Groceries", icon: "▧" },
+  { id: "dining_fun", label: "Dining & Fun", icon: "✦" },
+  { id: "bills", label: "Bills", icon: "≋" },
+  { id: "subscriptions", label: "Subscriptions", icon: "↻" },
+  { id: "other", label: "Other", icon: "⋯" },
+];
+const ALIASES = {
+  rent: "housing",
+  dining: "dining_fun",
+  entertainment: "dining_fun",
+  utilities: "bills",
+  insurance: "bills",
+  transport: "other",
+  health: "other",
+  shopping: "other",
+};
+const categoryOf = (id) =>
+  CATS.find((c) => c.id === (ALIASES[id] || id)) || CATS[5];
+function nzDate(value = new Date()) {
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value))
+    return value;
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-NZ", {
+      timeZone: TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(d)
+      .map((x) => [x.type, x.value]),
   );
+  return `${p.year}-${p.month}-${p.day}`;
 }
-
-
-function App() {
-  // ── Auth ────────────────────────────────────────────────────
-  const [user,       setUser]       = useState(undefined); // undefined = checking, null = logged out
-  const [signingOut, setSigningOut] = useState(false);
-
-  useEffect(() => {
-    const unsub = auth.onAuthStateChanged(u => setUser(u));
-    return unsub;
-  }, []);
-
-  // ── Persisted data ──────────────────────────────────────────
-  const [exps,        setExps]       = useState([]);
-  const [settlements, setSettlements]= useState([]);
-  const [names,       setNames]      = useState(DEFAULT_NAMES);
-  const [budgets,     setBudgets]    = useState({});
-  const [income,      setIncome]     = useState({});
-  const [buffer,      setBuffer]     = useState(null);
-  const [sideIncome,  setSideIncome] = useState([]);
-  const [loading,     setLoading]    = useState(true);
-  const [syncing,     setSyncing]    = useState(false);
-
-  // ── Navigation ──────────────────────────────────────────────
-  const [tab,       setTab]      = useState("add");
-  const [budgetMo,  setBudgetMo] = useState(curMo());
-  const [viewWeekOffset, setViewWeekOffset] = useState(0);
-
-  // ── Add form ────────────────────────────────────────────────
-  const [by,    setBy]    = useState(null);
-  const [amt,   setAmt]   = useState("");
-  const [cat,   setCat]   = useState(null);
-  const [where, setWhere] = useState("");
-  const [note,  setNote]  = useState("");
-  const [freq,  setFreq]  = useState("once");
-  const [expenseDate, setExpenseDate] = useState(()=>localDateInput(new Date().toISOString()));
-  const [unexpected, setUnexpected] = useState(false);
-  const [wFocus,setWFocus]= useState(false);
-  const [showRecurring,setShowRecurring]= useState(false);
-
-  // ── UI state ────────────────────────────────────────────────
-  const [toast,       setToast]      = useState(null);
-  const [modal,       setModal]      = useState(null);
-  const [draftNames,  setDraftNames] = useState({p1:"",p2:""});
-  const [draftBudget, setDraftBudget]= useState("");
-  const [draftIncome,  setDraftIncome]= useState({amt:"",freq:"monthly"});
-  const [draftBuffer,  setDraftBuffer]= useState("");
-  const [editDraft,    setEditDraft]  = useState(null);
-  const [draftSide,    setDraftSide]  = useState({by:"p1",amt:"",note:""});
-  const [draftSettle, setDraftSettle]= useState("");
-
-  const amtRef   = useRef(null);
-  const whereRef = useRef(null);
-
-  // ── Firebase real-time listener ──────────────────────────────
-  useEffect(() => {
-    if (!user) { setLoading(false); return; }
-    const ref = db.ref("/tracker-32ae945b1ea1512a226cd186");
-    ref.on("value", snap => {
-      const d = snap.val() || {};
-      setExps((d.expenses||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
-      setSettlements((d.settlements||[]).sort((a,b)=>b.ts.localeCompare(a.ts)));
-      if (d.names)   setNames(d.names);
-      if (d.budgets) setBudgets(d.budgets);
-      if (d.income)  setIncome(d.income);
-      if (d.buffer)  setBuffer(d.buffer);
-      if (d.sideIncome) setSideIncome(d.sideIncome);
-      setLoading(false); setSyncing(false);
-    }, () => setLoading(false));
-    return () => ref.off();
-  }, [user]);
-
-  const persist = useCallback(async (e, n, b, s, inc, buf, side) => {
-    setSyncing(true);
-    try { await db.ref("/tracker-32ae945b1ea1512a226cd186").set({ expenses:e, names:n, budgets:b, settlements:s, income:inc, buffer:buf, sideIncome:side }); }
-    catch { toast_("Couldn't save — check connection", true); setSyncing(false); }
-  }, []);
-
-  const toast_ = (msg, err=false) => { setToast({msg,err}); setTimeout(()=>setToast(null),2400); };
-
-  // ── Autocomplete ─────────────────────────────────────────────
-  const suggs = useMemo(() => {
-    const f={};
-    exps.forEach(e=>{ if(e.where&&e.where!=="Unspecified") f[e.where]=(f[e.where]||0)+1; });
-    return Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([place,count])=>({place,count}));
-  }, [exps]);
-
-  const filtSuggs = useMemo(() => {
-    if (!wFocus) return [];
-    if (!where.trim()) return suggs.slice(0,5);
-    const q = where.toLowerCase();
-    return suggs.filter(s=>s.place.toLowerCase().includes(q)&&s.place.toLowerCase()!==q).slice(0,5);
-  }, [where, wFocus, suggs]);
-
-  // ── Derived values ───────────────────────────────────────────
-  const thisW     = weekOf();
-  const lastW     = weekOf(new Date(Date.now()-7*86400000));
-  const isThur    = new Date().getDay()===4;
-  const thisWExps = exps.filter(e=>e.week===thisW);
-  const lastWExps = exps.filter(e=>e.week===lastW);
-  const thisWSettl= settlements.filter(s=>s.week===thisW);
-  const viewW     = weekOf(new Date(Date.now() + viewWeekOffset*7*86400000));
-  const viewWExps = exps.filter(e=>e.week===viewW);
-  const viewWSettl= settlements.filter(s=>s.week===viewW);
-  const viewWSide = sideIncome.filter(s=>s.week===viewW);
-  const viewWBal  = getBal(splittable(viewWExps));
-  const bmoExps   = moExps(exps, budgetMo);
-  const lastMoExp = moExps(exps, prevMo(budgetMo));
-
-  // Balance includes settlements
-  const expBal   = getBal(splittable(exps));
-  const settlBal = getSettleBal(settlements);
-  const totalBal = expBal + settlBal;
-  const weekBal  = getBal(splittable(thisWExps));
-  const lastBal  = getBal(splittable(lastWExps));
-
-  const aC   = by==="p1"?"var(--p1)":by==="p2"?"var(--p2)":"var(--text)";
-  const aHex = by==="p1"?"#2F6FED":by==="p2"?"#8A3FEF":"#1A1A1F";
-
-  const balLabel = b => {
-    if (Math.abs(b)<0.01) return "All square ✓";
-    return `${b>0?names.p2:names.p1} owes ${b>0?names.p1:names.p2}`;
-  };
-
-  const catTotals = expList => {
-    const t={};
-    expList.forEach(e=>{ const c=e.category||"other"; t[c]=(t[c]||0)+e.amt; });
-    return CATS.filter(c=>t[c.id]).map(c=>({...c,total:t[c.id]})).sort((a,b)=>b.total-a.total);
-  };
-
-  const recurringItems = useMemo(()=>{
-    const seen={};
-    exps.filter(e=>e.frequency&&e.frequency!=="once").forEach(e=>{
-      const k=`${e.category||"other"}|${e.where}|${e.frequency}|${e.by}`;
-      if(!seen[k]||e.ts>seen[k].ts) seen[k]=e;
-    });
-    return Object.values(seen).map(e=>({
-      ...e, monthlyAmt:e.frequency==="weekly"?e.amt*(52/12):e.frequency==="fortnightly"?e.amt*(26/12):e.amt
-    })).sort((a,b)=>b.monthlyAmt-a.monthlyAmt);
-  },[exps]);
-
-  // ── Actions ──────────────────────────────────────────────────
-  async function addExp() {
-    if (!by) return toast_("Tap who paid first",true);
-    const v=parseFloat(amt);
-    if (!v||v<=0) return toast_("Enter a valid amount",true);
-    const enteredDate = dateInputToDate(expenseDate);
-    const exp={id:String(Date.now()),ts:enteredDate.toISOString(),amt:v,where:where.trim()||"Unspecified",by,week:weekOf(enteredDate),category:cat||"other",frequency:freq,note:note.trim()||null,unexpected:unexpected};
-    const ne=[exp,...exps];
-    setAmt(""); setWhere(""); setCat(null); setFreq("once"); setNote(""); setExpenseDate(localDateInput(new Date().toISOString())); setWFocus(false); setUnexpected(false);
-    toast_(`${nzd(v)} added ✓`);
-    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
-  }
-
-  async function delExp(id) {
-    const ne=exps.filter(e=>e.id!==id); setModal(null);
-    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
-  }
-
-  function startEdit(exp) {
-    setEditDraft({
-      id: exp.id, by: exp.by, amt: String(exp.amt), category: exp.category||"other",
-      where: exp.where==="Unspecified"?"":exp.where, note: exp.note||"",
-      frequency: exp.frequency||"once", unexpected: !!exp.unexpected, date: localDateInput(exp.ts)
-    });
-    setModal({type:"edit"});
-  }
-
-  async function saveEdit() {
-    const v = parseFloat(editDraft.amt);
-    if (!v||v<=0) return toast_("Enter a valid amount",true);
-    const ne = exps.map(e => e.id===editDraft.id
-      ? {...e, by:editDraft.by, amt:v, category:editDraft.category, where:editDraft.where.trim()||"Unspecified", note:editDraft.note.trim()||null, frequency:editDraft.frequency, unexpected:editDraft.unexpected, ts:dateInputToDate(editDraft.date).toISOString(), week:weekOf(dateInputToDate(editDraft.date))}
-      : e
+function validDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s || "")) return false;
+  const d = new Date(s + "T12:00:00Z");
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+function shiftDate(s, n) {
+  const d = new Date(s + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function weekOf(s = nzDate()) {
+  s = nzDate(s);
+  const d = new Date(s + "T12:00:00Z");
+  return shiftDate(s, -((d.getUTCDay() - 4 + 7) % 7));
+}
+function shiftMonth(s, n) {
+  const [y, m] = s.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1 + n, 1, 12)).toISOString().slice(0, 7);
+}
+function daysInMonth(s) {
+  const [y, m] = s.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+const dateLabel = (s, options = { day: "numeric", month: "short" }) =>
+  new Date(s + "T12:00:00Z").toLocaleDateString("en-NZ", {
+    ...options,
+    timeZone: "UTC",
+  });
+const monthLabel = (s) =>
+  dateLabel(s + "-01", { month: "long", year: "numeric" });
+const money = (cents) =>
+  new Intl.NumberFormat("en-NZ", { style: "currency", currency: "NZD" }).format(
+    cents / 100,
+  );
+function parseMoney(value, allowZero = false) {
+  const s = String(value).trim();
+  if (!/^(?:\d+|\d*\.\d{1,2})$/.test(s))
+    throw new Error(
+      "Enter a number with up to two decimal places, such as 92.50.",
     );
-    setModal(null); toast_("Expense updated ✓");
-    await persist(ne,names,budgets,settlements,income,buffer,sideIncome);
-  }
-
-  async function saveNames() {
-    const nn={p1:draftNames.p1.trim()||names.p1, p2:draftNames.p2.trim()||names.p2};
-    setModal(null); toast_("Names saved ✓");
-    await persist(exps,nn,budgets,settlements,income,buffer,sideIncome);
-  }
-
-  function exportCSV() {
-    const rows = [["Date","Amount","Category","Where","Paid By","Frequency","Unexpected","Note"]];
-    [...exps].sort((a,b)=>a.ts.localeCompare(b.ts)).forEach(e=>{
-      const c = catById(e.category||"other");
-      rows.push([
-        new Date(e.ts).toLocaleDateString("en-NZ"),
-        e.amt.toFixed(2),
-        c.label,
-        e.where||"",
-        e.by==="p1"?names.p1:names.p2,
-        e.frequency||"once",
-        e.unexpected?"yes":"no",
-        (e.note||"").replace(/"/g,'""')
-      ]);
-    });
-    const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const blob = new Blob([csv], {type:"text/csv"});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses-${new Date().toISOString().slice(0,10)}.csv`;
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast_("CSV downloaded ✓");
-  }
-
-  async function saveBudget(catId) {
-    const v=parseFloat(draftBudget);
-    if(!v||v<=0){setModal(null);return;}
-    const nb={...budgets,[catId]:v}; setBudgets(nb); setModal(null); toast_("Budget saved ✓");
-    await persist(exps,names,nb,settlements,income,buffer,sideIncome);
-  }
-
-  async function saveIncome(who) {
-    const v=parseFloat(draftIncome.amt);
-    if(!v||v<=0){setModal(null);return;}
-    const hist = incomeHist(income,who);
-    const ni={...income,[who]:[...hist,{amt:v,freq:draftIncome.freq,from:new Date().toISOString()}]};
-    setIncome(ni); setModal(null); toast_("Income updated ✓");
-    await persist(exps,names,budgets,settlements,ni,buffer,sideIncome);
-  }
-
-  async function saveBuffer() {
-    const v=parseFloat(draftBuffer);
-    if(!v||v<=0){setModal(null);return;}
-    const nbuf={amt:v}; setBuffer(nbuf); setModal(null); toast_("Buffer target saved ✓");
-    await persist(exps,names,budgets,settlements,income,nbuf,sideIncome);
-  }
-
-  async function addSideIncome() {
-    const v=parseFloat(draftSide.amt);
-    if(!v||v<=0) return toast_("Enter a valid amount",true);
-    const entry={id:String(Date.now()),ts:new Date().toISOString(),amt:v,by:draftSide.by,note:draftSide.note.trim()||null,week:weekOf()};
-    const ns=[entry,...sideIncome];
-    setSideIncome(ns); setModal(null); toast_(`${nzd(v)} side hustle logged ✓`);
-    await persist(exps,names,budgets,settlements,income,buffer,ns);
-  }
-
-  async function delSideIncome(id) {
-    const ns=sideIncome.filter(s=>s.id!==id); setModal(null);
-    await persist(exps,names,budgets,settlements,income,buffer,ns);
-  }
-
-  async function settleUp() {
-    const v=parseFloat(draftSettle);
-    if(!v||v<=0){setModal(null);return;}
-    const debtor   = totalBal>0?"p2":"p1";
-    const creditor = totalBal>0?"p1":"p2";
-    const s={id:String(Date.now()),ts:new Date().toISOString(),amt:v,from:debtor,to:creditor,week:thisW};
-    const ns=[s,...settlements];
-    setModal(null); toast_(`Settled up ${nzd(v)} ✓`);
-    await persist(exps,names,budgets,ns,income,buffer,sideIncome);
-  }
-
-  // ── Shared style constants ────────────────────────────────────
-  const S = {
-    card:  {background:"var(--surf)",borderRadius:20,border:"1.5px solid var(--border)"},
-    lbl:   {fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10,display:"block"},
-    page:  {padding:"28px 20px 0"},
-    title: {fontSize:27,fontWeight:800,letterSpacing:"-0.7px",color:"var(--text)",marginBottom:4},
-    opt:   {textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11},
-  };
-
-  if (user === undefined) return (
-    <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
-      <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
-    </div>
-  );
-
-  if (user === null) return <LoginScreen/>;
-
-  if (loading) return (
-    <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
-      <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
-    </div>
-  );
-
-  // ════════════════════════════════════════════════════════════
+  const [whole, frac = ""] = s.split(".");
+  const cents = Number(whole || 0) * 100 + Number(frac.padEnd(2, "0"));
+  if (!Number.isSafeInteger(cents) || cents < 0 || (!allowZero && cents === 0))
+    throw new Error("Enter an amount greater than zero.");
+  return cents;
+}
+function records(value) {
+  return Object.entries(value || {})
+    .filter(([, r]) => r && typeof r === "object" && r.id)
+    .map(([key, raw]) => ({
+      ...raw,
+      _key: key,
+      _raw: raw,
+      date: raw.date || nzDate(raw.ts),
+      cents: Number.isSafeInteger(raw.cents)
+        ? raw.cents
+        : Math.round(Number(raw.amt || 0) * 100),
+      category: categoryOf(raw.category).id,
+    }))
+    .sort(
+      (a, b) =>
+        (b.date || "").localeCompare(a.date || "") ||
+        String(b.ts || "").localeCompare(String(a.ts || "")),
+    );
+}
+const sum = (list) => list.reduce((n, r) => n + r.cents, 0);
+function balanceOf(expenses, settlements) {
+  // Keep half-cent precision until the final payable amount is rounded.
+  const halfCents = expenses
+    .filter((e) => !categoryOf(e.category).noSplit)
+    .reduce((n, e) => n + (e.by === "p1" ? e.cents : -e.cents), 0);
   return (
-    <div style={{background:"var(--bg)",minHeight:"100vh",maxWidth:430,margin:"0 auto",paddingBottom:90}}>
-
-      {/* Sync bar */}
-      {syncing && <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"var(--p1)",zIndex:9999,animation:"pulse 1.4s ease infinite"}}/>}
-
-      {/* Toast */}
-      {toast && <div style={{position:"fixed",top:20,left:"50%",transform:"translateX(-50%)",background:toast.err?"var(--red)":"#1A1A2E",color:"#fff",borderRadius:99,padding:"11px 22px",fontSize:14,fontWeight:600,zIndex:9999,animation:"fadeup .2s ease",whiteSpace:"nowrap",boxShadow:"0 8px 30px rgba(0,0,0,.4)",pointerEvents:"none"}}>{toast.msg}</div>}
-
-      {/* ── MODAL: Delete ── */}
-      {modal?.type==="delete" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"20px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:18,fontWeight:700,marginBottom:6}}>Delete this entry?</div>
-            <div style={{fontSize:14,color:"var(--muted)",marginBottom:24}}>This can't be undone.</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-              <button onClick={()=>setModal(null)} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer",color:"var(--text)"}}>Cancel</button>
-              <button onClick={()=>modal.kind==="side"?delSideIncome(modal.id):delExp(modal.id)} style={{padding:16,background:"var(--red)",color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:600,cursor:"pointer"}}>Delete</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: Edit expense ── */}
-      {modal?.type==="edit" && editDraft && (()=>{
-        const eC = editDraft.by==="p1"?"var(--p1)":editDraft.by==="p2"?"var(--p2)":"var(--text)";
-        return (
-          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 44px",animation:"slidein .25s ease",maxHeight:"85vh",overflowY:"auto"}}>
-              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 20px"}}/>
-              <div style={{fontSize:20,fontWeight:800,marginBottom:18}}>Edit expense</div>
-
-              <span style={{...S.lbl,marginBottom:8}}>Who paid?</span>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-                {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>(
-                  <button key={k} onClick={()=>setEditDraft({...editDraft,by:k})}
-                    style={{padding:"14px 10px",background:editDraft.by===k?cv:"var(--surf2)",color:editDraft.by===k?"#fff":"var(--text)",border:"none",borderRadius:14,cursor:"pointer",fontSize:16,fontWeight:700}}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <span style={{...S.lbl,marginBottom:8}}>Amount</span>
-             <div style={{display:"flex",alignItems:"center",gap:6,background:"var(--surf2)",borderRadius:14,padding:"10px 16px",marginBottom:16,border:`2px solid ${eC}`}}>
-               <span style={{fontSize:22,color:eC,fontWeight:300}}>$</span>
-               <input type="text" inputMode="decimal" value={editDraft.amt} onChange={e=>setEditDraft({...editDraft,amt:e.target.value.replace(/[^0-9.]/g,"")})}
-                 style={{fontSize:26,fontWeight:800,border:"none",background:"none",width:"100%",color:eC}}/>
-             </div>
-
-             <span style={{...S.lbl,marginBottom:8}}>Date</span>
-             <input type="date" value={editDraft.date} onChange={e=>setEditDraft({...editDraft,date:e.target.value})}
-               style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:16,marginBottom:16,color:"var(--text)"}}/>
-
-              <span style={{...S.lbl,marginBottom:8}}>Category</span>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:16}}>
-                {CATS.map(c=>(
-                  <button key={c.id} onClick={()=>setEditDraft({...editDraft,category:c.id})}
-                    style={{padding:"9px 4px",background:editDraft.category===c.id?`${c.color}22`:"var(--surf2)",border:`2px solid ${editDraft.category===c.id?c.color:"transparent"}`,borderRadius:12,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                    <span style={{fontSize:16}}>{c.emoji}</span>
-                    <span style={{fontSize:10.5,fontWeight:editDraft.category===c.id?700:500,color:editDraft.category===c.id?c.color:"var(--muted)"}}>{c.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              <span style={{...S.lbl,marginBottom:8}}>Where</span>
-              <input type="text" value={editDraft.where} onChange={e=>setEditDraft({...editDraft,where:e.target.value})}
-                style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:15,marginBottom:16,color:"var(--text)"}}/>
-
-              <span style={{...S.lbl,marginBottom:8}}>Note</span>
-              <input type="text" value={editDraft.note} onChange={e=>setEditDraft({...editDraft,note:e.target.value})}
-                style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:14,marginBottom:16,color:"var(--text)"}}/>
-
-              <span style={{...S.lbl,marginBottom:8}}>Frequency</span>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:16}}>
-                {FREQS.map(f=>(
-                  <button key={f.id} onClick={()=>setEditDraft({...editDraft,frequency:f.id})}
-                    style={{padding:"9px 2px",background:editDraft.frequency===f.id?"var(--surf2)":"none",border:`2px solid ${editDraft.frequency===f.id?"var(--p1)":"var(--border)"}`,borderRadius:12,cursor:"pointer",fontSize:10.5,fontWeight:editDraft.frequency===f.id?700:500,color:editDraft.frequency===f.id?"var(--p1)":"var(--muted)"}}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-
-              <button onClick={()=>setEditDraft({...editDraft,unexpected:!editDraft.unexpected})}
-                style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:editDraft.unexpected?"#FFF4E0":"var(--surf2)",border:`2px solid ${editDraft.unexpected?"var(--amber)":"transparent"}`,borderRadius:14,padding:"11px 0",cursor:"pointer",marginBottom:20}}>
-                <span style={{fontSize:14}}>⚠️</span>
-                <span style={{fontSize:13,fontWeight:700,color:editDraft.unexpected?"var(--amber)":"var(--muted)"}}>{editDraft.unexpected?"Marked as unexpected":"Mark as unexpected"}</span>
-              </button>
-
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <button onClick={()=>{setModal({type:"delete",id:editDraft.id});}} style={{padding:15,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Delete</button>
-                <button onClick={saveEdit} style={{padding:15,background:eC,color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save changes</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── MODAL: Edit names ── */}
-      {modal?.type==="settings" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 28px"}}/>
-            <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Edit names</div>
-            <div style={{fontSize:14,color:"var(--muted)",marginBottom:22,lineHeight:1.5}}>Change the names shown on buttons and summaries.</div>
-            <div style={{...S.lbl,marginBottom:8}}>Your name</div>
-            <input value={draftNames.p1} onChange={e=>setDraftNames({...draftNames,p1:e.target.value})} placeholder={names.p1} autoFocus
-              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:16,color:"var(--text)",background:"var(--surf2)"}}/>
-            <div style={{...S.lbl,marginBottom:8}}>Partner's name</div>
-            <input value={draftNames.p2} onChange={e=>setDraftNames({...draftNames,p2:e.target.value})} placeholder={names.p2}
-              style={{width:"100%",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:18,marginBottom:22,color:"var(--text)",background:"var(--surf2)"}}/>
-            <button onClick={saveNames} style={{width:"100%",background:"var(--p1)",color:"#fff",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer",marginBottom:12}}>Save names</button>
-            <button onClick={exportCSV} style={{width:"100%",background:"var(--surf2)",color:"var(--text)",border:"none",borderRadius:16,padding:"14px 0",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1={12} y1={15} x2={12} y2={3}/></svg>
-              Export data (CSV)
-            </button>
-            <button onClick={()=>{setSigningOut(true);auth.signOut();}} style={{width:"100%",background:"none",color:"var(--muted)",border:"none",padding:"10px 0",fontSize:14,fontWeight:600,cursor:"pointer"}}>
-              {signingOut?"Signing out…":`Sign out (${user?.email||""})`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: Set budget ── */}
-      {modal?.type==="budget" && (()=>{
-        const c=catById(modal.catId);
-        return (
-          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-                <div style={{width:44,height:44,borderRadius:14,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{c.emoji}</div>
-                <div>
-                  <div style={{fontSize:20,fontWeight:800}}>{c.label}</div>
-                  <div style={{fontSize:13,color:"var(--muted)"}}>Monthly budget</div>
-                </div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:18,border:"2px solid var(--border)"}}>
-                <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
-                <input type="text" inputMode="decimal" placeholder="0.00" value={draftBudget} onChange={e=>setDraftBudget(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
-                  style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:budgets[modal.catId]?"1fr 1fr":"1fr",gap:10}}>
-                {budgets[modal.catId] && <button onClick={()=>{const nb={...budgets};delete nb[modal.catId];setBudgets(nb);persist(exps,names,nb,settlements,income,buffer,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
-                <button onClick={()=>saveBudget(modal.catId)} style={{padding:16,background:c.color,color:"#000",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save budget</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── MODAL: Set income ── */}
-      {modal?.type==="income" && (()=>{
-        const who = modal.who;
-        const label = who==="p1"?names.p1:names.p2;
-        const cv = who==="p1"?"var(--p1)":"var(--p2)";
-        return (
-          <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-            <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-              <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-              <div style={{fontSize:20,fontWeight:800,marginBottom:4,color:cv}}>{label}'s income</div>
-              <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>Changes apply from today onward — past weeks and months keep whatever rate was true at the time.</div>
-              <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:14,border:"2px solid var(--border)"}}>
-                <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
-                <input type="text" inputMode="decimal" placeholder="0.00" value={draftIncome.amt} onChange={e=>setDraftIncome({...draftIncome,amt:e.target.value.replace(/[^0-9.]/g,"")})} autoFocus
-                  style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:20}}>
-                {[["weekly","Weekly"],["fortnightly","Fortnight"],["monthly","Monthly"]].map(([id,l])=>(
-                  <button key={id} onClick={()=>setDraftIncome({...draftIncome,freq:id})}
-                    style={{padding:"11px 4px",background:draftIncome.freq===id?"var(--surf2)":"none",border:`2px solid ${draftIncome.freq===id?cv:"var(--border)"}`,borderRadius:13,cursor:"pointer",fontSize:12.5,fontWeight:draftIncome.freq===id?700:500,color:draftIncome.freq===id?cv:"var(--muted)"}}>
-                    {l}
-                  </button>
-                ))}
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:income[who]?"1fr 1fr":"1fr",gap:10}}>
-                {income[who] && <button onClick={()=>{const ni={...income};delete ni[who];setIncome(ni);persist(exps,names,budgets,settlements,ni,buffer,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
-                <button onClick={()=>saveIncome(who)} style={{padding:16,background:cv,color:"#fff",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save income</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── MODAL: Log side hustle income ── */}
-      {modal?.type==="sideIncome" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-            <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>💪 Side hustle income</div>
-            <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>Log a one-off payment — freelance work, selling something, whatever comes in.</div>
-
-            <span style={{...S.lbl,marginBottom:8}}>Who earned it?</span>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-              {[["p1",names.p1,"var(--p1)"],["p2",names.p2,"var(--p2)"]].map(([k,label,cv])=>(
-                <button key={k} onClick={()=>setDraftSide({...draftSide,by:k})}
-                  style={{padding:"14px 10px",background:draftSide.by===k?cv:"var(--surf2)",color:draftSide.by===k?"#fff":"var(--text)",border:"none",borderRadius:14,cursor:"pointer",fontSize:16,fontWeight:700}}>
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            <span style={{...S.lbl,marginBottom:8}}>Amount</span>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:16,border:"2px solid var(--green)"}}>
-              <span style={{fontSize:26,color:"var(--green)",fontWeight:300}}>$</span>
-              <input type="text" inputMode="decimal" placeholder="0.00" value={draftSide.amt} onChange={e=>setDraftSide({...draftSide,amt:e.target.value.replace(/[^0-9.]/g,"")})} autoFocus
-                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--green)",letterSpacing:"-1px"}}/>
-            </div>
-
-            <span style={{...S.lbl,marginBottom:8}}>What was it? <span style={S.opt}>(optional)</span></span>
-            <input type="text" placeholder="Etsy sale, freelance design, mowing lawns…" value={draftSide.note} onChange={e=>setDraftSide({...draftSide,note:e.target.value})}
-              style={{width:"100%",background:"var(--surf2)",border:"none",borderRadius:14,padding:"13px 16px",fontSize:15,marginBottom:20,color:"var(--text)"}}/>
-
-            <button onClick={addSideIncome} style={{width:"100%",background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Log income</button>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: Set unexpected buffer target ── */}
-      {modal?.type==="buffer" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-            <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>⚠️ Unexpected buffer</div>
-            <div style={{fontSize:13,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>How much you'd like to set aside each month for surprise costs — car repairs, vet bills, that kind of thing.</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:18,border:"2px solid var(--border)"}}>
-              <span style={{fontSize:26,color:"var(--muted)",fontWeight:300}}>$</span>
-              <input type="text" inputMode="decimal" placeholder="0.00" value={draftBuffer} onChange={e=>setDraftBuffer(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
-                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--text)",letterSpacing:"-1px"}}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:buffer?"1fr 1fr":"1fr",gap:10}}>
-              {buffer && <button onClick={()=>{setBuffer(null);persist(exps,names,budgets,settlements,income,null,sideIncome);setModal(null);}} style={{padding:16,background:"var(--surf2)",border:"none",borderRadius:16,fontSize:15,fontWeight:600,cursor:"pointer",color:"var(--red)"}}>Remove</button>}
-              <button onClick={saveBuffer} style={{padding:16,background:"var(--amber)",color:"#1A1A1F",border:"none",borderRadius:16,fontSize:16,fontWeight:800,cursor:"pointer"}}>Save target</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL: Settle up ── */}
-      {modal?.type==="settle" && (
-        <div onClick={()=>setModal(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:500,display:"flex",alignItems:"flex-end"}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"var(--surf)",width:"100%",maxWidth:430,margin:"0 auto",borderRadius:"24px 24px 0 0",padding:"16px 24px 52px",animation:"slidein .25s ease"}}>
-            <div style={{width:36,height:4,background:"var(--border)",borderRadius:2,margin:"0 auto 24px"}}/>
-            <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Settle up</div>
-            <div style={{fontSize:14,color:"var(--muted)",marginBottom:20,lineHeight:1.5}}>
-              Records a payment between you two. Edit the amount for a partial settlement.
-            </div>
-            {/* Who owes whom */}
-            <div style={{background:"var(--surf2)",borderRadius:16,padding:"16px 18px",marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div>
-                <div style={{fontSize:13,color:"var(--muted)",marginBottom:3}}>{balLabel(totalBal)}</div>
-                <div style={{fontSize:11,color:"var(--muted)"}}>before settlement</div>
-              </div>
-              <div style={{fontSize:26,fontWeight:800,color:"var(--amber)"}}>{nzd(totalBal)}</div>
-            </div>
-            {/* Amount input */}
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"var(--surf2)",borderRadius:16,padding:"14px 18px",marginBottom:22,border:"2px solid var(--green)"}}>
-              <span style={{fontSize:26,color:"var(--green)",fontWeight:300}}>$</span>
-              <input type="text" inputMode="decimal" value={draftSettle} onChange={e=>setDraftSettle(e.target.value.replace(/[^0-9.]/g,""))} autoFocus
-                style={{fontSize:32,fontWeight:800,border:"none",background:"none",width:"100%",color:"var(--green)",letterSpacing:"-1px"}}/>
-            </div>
-            <button onClick={settleUp} style={{width:"100%",background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:18,padding:"18px 0",fontSize:18,fontWeight:800,cursor:"pointer"}}>Confirm settlement</button>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════
-          ADD TAB
-      ══════════════════════════════════════════════════════ */}
-      {tab==="add" && (
-        <div key="add" className="tab-anim" style={S.page}>
-
-          {/* Header */}
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
-            <div>
-              <div style={S.title}>Add expense</div>
-              <div style={{fontSize:14,color:"var(--muted)"}}>{longDate(new Date().toISOString())}</div>
-            </div>
-            <button onClick={()=>{setDraftNames({p1:names.p1,p2:names.p2});setModal({type:"settings"});}} style={{background:"none",border:"none",cursor:"pointer",padding:"4px 0 4px 12px",color:"var(--muted)"}}>
-              <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <circle cx={12} cy={12} r={3}/>
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-              </svg>
-            </button>
-          </div>
-
-          {/* Balance pill — with Settle up button when there's a balance */}
-          <div style={{background:Math.abs(totalBal)<0.01?"#E7F7EF":"#FFF4E0",border:`1.5px solid ${Math.abs(totalBal)<0.01?"#BFE8D3":"#FBDFA8"}`,borderRadius:16,padding:"13px 16px",marginBottom:22,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontSize:13,fontWeight:600,color:Math.abs(totalBal)<0.01?"#2ECFA0":"var(--amber)"}}>
-              {Math.abs(totalBal)<0.01?"All square":"Running total"}
-              {Math.abs(totalBal)>=0.01&&<div style={{fontSize:12,fontWeight:500,color:"var(--muted)",marginTop:2}}>{balLabel(totalBal)}</div>}
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <div key={totalBal.toFixed(2)} className="amt-anim" style={{fontSize:20,fontWeight:800,color:Math.abs(totalBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(totalBal)<0.01?"✓":nzd(totalBal)}</div>
-              {Math.abs(totalBal)>=0.01&&(
-                <button onClick={()=>{setDraftSettle(Math.abs(totalBal).toFixed(2));setModal({type:"settle"});}}
-                  style={{background:"var(--green)",color:"#0A1A14",border:"none",borderRadius:10,padding:"7px 12px",fontSize:13,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-                  Settle ↗
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Quick add recurring */}
-          {recurringItems.length>0 && (
-            <div style={{marginBottom:18,position:"relative"}}>
-              <button onClick={()=>setShowRecurring(!showRecurring)}
-                style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",background:"var(--surf)",border:`2px solid ${showRecurring?"var(--p1)":"var(--border)"}`,borderRadius:16,padding:"13px 16px",cursor:"pointer",transition:"border-color .2s"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="var(--p1)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-                    <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-                  </svg>
-                  <span style={{fontSize:15,fontWeight:700,color:"var(--text)"}}>Quick add recurring</span>
-                  <span style={{fontSize:11,fontWeight:700,color:"var(--muted)",background:"var(--surf2)",borderRadius:99,padding:"1.5px 8px"}}>{recurringItems.length}</span>
-                </div>
-                <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"
-                  style={{transition:"transform .25s",transform:showRecurring?"rotate(180deg)":"rotate(0deg)",flexShrink:0}}>
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-              </button>
-
-              {showRecurring && (<>
-                <div onClick={()=>setShowRecurring(false)} style={{position:"fixed",inset:0,zIndex:60,background:"transparent"}}/>
-                <div style={{position:"absolute",top:"calc(100% + 8px)",left:0,right:0,zIndex:70,background:"var(--surf)",border:"2px solid var(--border)",borderRadius:18,overflow:"hidden",boxShadow:"0 16px 40px rgba(0,0,0,.18)",animation:"dropopen .2s cubic-bezier(.2,.8,.2,1)",maxHeight:280,overflowY:"auto"}}>
-                  {recurringItems.map(e=>{
-                    const c=catById(e.category||"other");
-                    return (
-                      <button key={e.id} className="rec-row" onClick={()=>{
-                        setBy(e.by); setCat(e.category||"other"); setWhere(e.where);
-                        setAmt(String(e.amt)); setFreq(e.frequency); setNote("");
-                        setShowRecurring(false);
-                        setTimeout(()=>amtRef.current?.focus(),50);
-                      }} style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
-                        <div style={{width:34,height:34,borderRadius:10,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{c.emoji}</div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:14,fontWeight:700,color:"var(--text)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{e.where}</div>
-                          <div style={{fontSize:11,color:"var(--muted)",marginTop:1}}>{e.by==="p1"?names.p1:names.p2} · <span style={{color:c.color,fontWeight:600}}>↻ {e.frequency}</span></div>
-                        </div>
-                        <div style={{fontSize:15,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(e.amt)}</div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>)}
-            </div>
-          )}
-
-          {/* Who paid */}
-          <span style={S.lbl}>Who paid?</span>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:22}}>
-            {[["p1",names.p1,"var(--p1)","#2F6FED"],["p2",names.p2,"var(--p2)","#8A3FEF"]].map(([k,label,cv,hex])=>(
-              <button key={k} className="btn-name" onClick={()=>{setBy(k);setTimeout(()=>amtRef.current?.focus(),50);}}
-                style={{padding:"22px 16px",background:by===k?cv:"var(--surf)",color:by===k?"#fff":"var(--text)",border:`2.5px solid ${by===k?cv:"var(--border)"}`,borderRadius:20,cursor:"pointer",fontSize:22,fontWeight:800,transition:"all .15s ease",boxShadow:by===k?`0 6px 28px ${hex}50`:"none"}}>
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Amount */}
-          <span style={S.lbl}>Amount</span>
-          <div style={{...S.card,padding:"14px 20px",marginBottom:18,display:"flex",alignItems:"center",gap:6,border:`2px solid ${amt?aC:"var(--border)"}`,transition:"border-color .2s"}}>
-            <span style={{fontSize:30,color:amt?aC:"#C6C3B8",fontWeight:300,lineHeight:1,transition:"color .2s"}}>$</span>
-            <input ref={amtRef} type="text" inputMode="decimal" placeholder="0.00" value={amt} onChange={e=>setAmt(e.target.value.replace(/[^0-9.]/g,""))}
-              style={{fontSize:40,fontWeight:800,border:"none",background:"none",width:"100%",letterSpacing:"-1.5px",color:amt?(by?aC:"var(--text)"):"#C6C3B8",transition:"color .2s"}}/>
-          </div>
-
-          <span style={S.lbl}>Date</span>
-          <input type="date" value={expenseDate} onChange={e=>setExpenseDate(e.target.value)}
-            style={{width:"100%",background:"var(--surf)",border:"2px solid var(--border)",borderRadius:16,padding:"14px 18px",fontSize:16,marginBottom:18,color:"var(--text)"}}/>
-
-          {/* Category */}
-          <span style={S.lbl}>Category</span>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:18}}>
-            {CATS.map(c=>(
-              <button key={c.id} className="cat-btn" onClick={()=>setCat(cat===c.id?null:c.id)}
-                style={{padding:"10px 6px",background:cat===c.id?`${c.color}22`:"var(--surf)",border:`2px solid ${cat===c.id?c.color:"var(--border)"}`,borderRadius:14,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4,transition:"all .15s"}}>
-                <span style={{fontSize:18}}>{c.emoji}</span>
-                <span style={{fontSize:11,fontWeight:cat===c.id?700:500,color:cat===c.id?c.color:"var(--muted)"}}>{c.label}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* Where */}
-          <span style={S.lbl}>Where? <span style={S.opt}>(optional)</span></span>
-          <div style={{position:"relative",marginBottom:14}}>
-            <div style={{...S.card,padding:"15px 20px",border:`2px solid ${where?aC:wFocus?"#44445A":"var(--border)"}`,transition:"border-color .2s",borderRadius:filtSuggs.length>0&&wFocus?"20px 20px 0 0":20}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                {suggs.length>0&&<svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke={where?aC:"var(--muted)"} strokeWidth={2} strokeLinecap="round" style={{flexShrink:0}}><circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/></svg>}
-                <input ref={whereRef} type="text" placeholder={suggs.length>0?"Tap for recent places…":"PAK'nSave, power bill…"} value={where}
-                  onChange={e=>setWhere(e.target.value)} onFocus={()=>setWFocus(true)} onBlur={()=>setTimeout(()=>setWFocus(false),150)}
-                  style={{fontSize:17,fontWeight:500,border:"none",background:"none",width:"100%",color:where?"var(--text)":"#C6C3B8"}}/>
-              </div>
-            </div>
-            {wFocus&&filtSuggs.length>0&&(
-              <div style={{position:"absolute",top:"100%",left:0,right:0,background:"var(--surf)",borderRadius:"0 0 20px 20px",border:"2px solid var(--border)",borderTop:"1px solid var(--border)",overflow:"hidden",zIndex:50,boxShadow:"0 12px 32px rgba(0,0,0,.4)"}}>
-                {filtSuggs.map(({place,count})=>(
-                  <button key={place} className="sugg-row" onMouseDown={e=>e.preventDefault()} onClick={()=>{setWhere(place);setWFocus(false);whereRef.current?.blur();}}
-                    style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"12px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
-                    <div style={{width:30,height:30,borderRadius:9,background:"var(--surf2)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth={2} strokeLinecap="round"><circle cx={12} cy={12} r={9}/><polyline points="12 7 12 12 15 15"/></svg>
-                    </div>
-                    <span style={{fontSize:15,fontWeight:600,color:"var(--text)",flex:1}}>{place}</span>
-                    {count>1&&<span style={{fontSize:12,color:"var(--muted)",background:"var(--surf2)",borderRadius:99,padding:"3px 8px",fontWeight:600}}>×{count}</span>}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Note */}
-          <span style={S.lbl}>Note <span style={S.opt}>(optional)</span></span>
-          <div style={{...S.card,padding:"14px 20px",marginBottom:18,border:`2px solid ${note?aC:"var(--border)"}`,transition:"border-color .2s"}}>
-            <input type="text" placeholder="School shoes, Nick's work dinner, Findlay's birthday…" value={note} onChange={e=>setNote(e.target.value)}
-              style={{fontSize:15,fontWeight:500,border:"none",background:"none",width:"100%",color:note?"var(--text)":"#C6C3B8"}}/>
-          </div>
-
-          {/* Frequency */}
-          <span style={S.lbl}>Frequency</span>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:28}}>
-            {FREQS.map(f=>(
-              <button key={f.id} onClick={()=>setFreq(f.id)}
-                style={{padding:"11px 4px",background:freq===f.id?"var(--surf2)":"var(--surf)",border:`2px solid ${freq===f.id?"var(--p1)":"var(--border)"}`,borderRadius:13,cursor:"pointer",fontSize:11.5,fontWeight:freq===f.id?700:500,color:freq===f.id?"var(--p1)":"var(--muted)",transition:"all .15s"}}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Unexpected toggle */}
-          <button onClick={()=>setUnexpected(!unexpected)}
-            style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:unexpected?"#FFF4E0":"var(--surf)",border:`2px solid ${unexpected?"var(--amber)":"var(--border)"}`,borderRadius:16,padding:"13px 0",cursor:"pointer",marginBottom:18,transition:"all .15s"}}>
-            <span style={{fontSize:16}}>⚠️</span>
-            <span style={{fontSize:14,fontWeight:700,color:unexpected?"var(--amber)":"var(--muted)"}}>{unexpected?"Marked as unexpected":"Mark as unexpected expense"}</span>
-          </button>
-
-          {/* Submit */}
-          <button className="add-btn" onClick={addExp}
-            style={{width:"100%",background:by?aC:"var(--surf2)",color:by?"#fff":"var(--muted)",border:"none",borderRadius:20,padding:"20px 0",fontSize:18,fontWeight:800,cursor:"pointer",transition:"background .2s,box-shadow .2s",boxShadow:by?`0 8px 32px ${aHex}50`:"none",marginBottom:8}}>
-            Add expense
-          </button>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════
-          WEEK TAB
-      ══════════════════════════════════════════════════════ */}
-      {tab==="week" && (
-        <div key="week" className="tab-anim" style={S.page}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-            <button onClick={()=>setViewWeekOffset(viewWeekOffset-1)} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>‹</button>
-            <div style={{...S.title,marginBottom:0,textAlign:"center"}}>{viewWeekOffset===0?"This week":"Week"}</div>
-            <button onClick={()=>setViewWeekOffset(viewWeekOffset+1)} disabled={viewWeekOffset>=0} style={{background:"none",border:"none",cursor:"pointer",color:viewWeekOffset>=0?"var(--border)":"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>›</button>
-          </div>
-          <div style={{fontSize:14,color:"var(--muted)",marginBottom:8,textAlign:"center"}}>
-            {shortDate(viewW)} — {shortDate(new Date(new Date(viewW).getTime()+6*86400000).toISOString())}
-          </div>
-          {viewWeekOffset!==0 && <div style={{textAlign:"center",marginBottom:16}}>
-            <button onClick={()=>setViewWeekOffset(0)} style={{background:"var(--surf2)",border:"none",borderRadius:99,padding:"6px 14px",fontSize:12,fontWeight:700,color:"var(--p1)",cursor:"pointer"}}>Back to this week</button>
-          </div>}
-          {viewWeekOffset===0 && <div style={{marginBottom:16}}/>}
-
-          {/* Thursday: last week tally */}
-          {viewWeekOffset===0&&isThur&&lastWExps.length>0&&(
-            <div style={{background:"#EEF0FF",border:"1.5px solid #C7CCFA",borderRadius:20,padding:"18px 20px",marginBottom:14}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#4B4FC4",textTransform:"uppercase",letterSpacing:".08em",marginBottom:10}}>📋 Last week — final tally</div>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                <div style={{fontSize:16,fontWeight:700,color:"#3C40B8"}}>{Math.abs(lastBal)<0.01?"All square ✓":balLabel(lastBal)}</div>
-                <div style={{fontSize:26,fontWeight:800,color:"#4B4FC4"}}>{Math.abs(lastBal)<0.01?"✓":nzd(lastBal)}</div>
-              </div>
-              <div style={{fontSize:13,color:"#6669C9"}}>{lastWExps.length} purchases · {nzd(lastWExps.reduce((a,e)=>a+e.amt,0))} total</div>
-            </div>
-          )}
-
-          {/* Week summary */}
-          <div style={{...S.card,padding:20,marginBottom:14}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
-              {[["p1",names.p1,"var(--p1)","#2F6FED"],["p2",names.p2,"var(--p2)","#8A3FEF"]].map(([k,label,cv,hex])=>{
-                const paid=viewWExps.filter(e=>e.by===k).reduce((a,e)=>a+e.amt,0);
-                return (
-                  <div key={k} style={{background:`${hex}14`,borderRadius:14,padding:"14px 16px"}}>
-                    <div style={{fontSize:11,fontWeight:700,color:cv,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>{label}</div>
-                    <div style={{fontSize:26,fontWeight:800,color:cv}}>{nzd(paid)}</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>paid this week</div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{fontSize:13,color:"var(--muted)",marginBottom:14}}>
-              {viewWExps.length} purchase{viewWExps.length!==1?"s":""} · total {nzd(viewWExps.reduce((a,e)=>a+e.amt,0))}
-            </div>
-            <div style={{borderTop:"1px solid var(--border)",paddingTop:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:14,color:"var(--muted)",fontWeight:600}}>{Math.abs(viewWBal)<0.01?"All square this week":balLabel(viewWBal)}</div>
-              <div style={{fontSize:26,fontWeight:800,color:Math.abs(viewWBal)<0.01?"var(--green)":"var(--amber)"}}>{Math.abs(viewWBal)<0.01?"✓":nzd(viewWBal)}</div>
-            </div>
-          </div>
-
-          {/* Weekly savings snapshot */}
-          {(()=>{
-            const weekEnd = new Date(new Date(viewW).getTime()+7*86400000-1).toISOString();
-            const r1 = incomeAt(income,"p1",weekEnd), r2 = incomeAt(income,"p2",weekEnd);
-            const weeklyRegular = (r1?weeklyEquiv(r1.amt,r1.freq):0) + (r2?weeklyEquiv(r2.amt,r2.freq):0);
-            const weeklySide    = sideIncome.filter(s=>s.week===viewW).reduce((a,s)=>a+s.amt,0);
-            const weeklyIncome  = weeklyRegular + weeklySide;
-            if (weeklyIncome===0) return null;
-            const weeklySpent  = viewWExps.reduce((a,e)=>a+e.amt,0);
-            const weeklyNet    = weeklyIncome - weeklySpent;
-            return (
-              <div style={{...S.card,padding:"16px 20px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>Income this week</div>
-                  <div style={{fontSize:20,fontWeight:800,color:"var(--text)"}}>{nzd(weeklyIncome)}</div>
-                  {weeklySide>0&&<div style={{fontSize:11,color:"var(--green)",marginTop:1,fontWeight:600}}>incl. {nzd(weeklySide)} side hustle</div>}
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>{weeklyNet>=0?"Left over":"Overspent"}</div>
-                  <div style={{fontSize:20,fontWeight:800,color:weeklyNet>=0?"var(--green)":"var(--red)"}}>{nzd(weeklyNet)}</div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Category breakdown */}
-          {catTotals(viewWExps).length>0&&(<>
-            <span style={{...S.lbl,marginTop:8}}>By category</span>
-            <div style={{...S.card,padding:"6px 0",marginBottom:14}}>
-              {(()=>{const cts=catTotals(viewWExps);const max=cts[0]?.total||1;return cts.map(c=>(
-                <div key={c.id} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 16px",borderBottom:"1px solid var(--border)"}}>
-                  <span style={{fontSize:18,flexShrink:0}}>{c.emoji}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                      <span style={{fontSize:13,fontWeight:600,color:c.color}}>{c.label}</span>
-                      <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>{nzd(c.total)}</span>
-                    </div>
-                    <div style={{background:"var(--border)",borderRadius:99,height:5}}>
-                      <div style={{background:c.color,borderRadius:99,height:5,width:`${(c.total/max)*100}%`,opacity:.85}}/>
-                    </div>
-                  </div>
-                </div>
-              ))})()}
-            </div>
-          </>)}
-
-          {/* Settlements this week */}
-          {viewWSettl.length>0&&(<>
-            <span style={{...S.lbl,marginTop:8}}>Settlements</span>
-            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-              {viewWSettl.map(s=>(
-                <div key={s.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
-                  <div style={{width:40,height:40,borderRadius:12,background:"#E7F7EF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>✓</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:15,fontWeight:600,color:"var(--green)"}}>Settled up</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.from==="p1"?names.p1:names.p2} → {s.to==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
-                  </div>
-                  <div style={{fontSize:17,fontWeight:800,color:"var(--green)",flexShrink:0}}>{nzd(s.amt)}</div>
-                </div>
-              ))}
-            </div>
-          </>)}
-
-          {/* Side hustle income this week */}
-          {viewWSide.length>0&&(<>
-            <span style={{...S.lbl,marginTop:8}}>💪 Side hustle income</span>
-            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-              {viewWSide.map(s=>(
-                <div key={s.id} className="row" onClick={()=>setModal({type:"delete",id:s.id,kind:"side"})} style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)",cursor:"pointer"}}>
-                  <div style={{width:40,height:40,borderRadius:12,background:"#E7F7EF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>💪</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:15,fontWeight:600,color:"var(--text)"}}>{s.note||"Side hustle"}</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{s.by==="p1"?names.p1:names.p2} · {shortDate(s.ts)}</div>
-                  </div>
-                  <div style={{fontSize:17,fontWeight:800,color:"var(--green)",flexShrink:0}}>+{nzd(s.amt)}</div>
-                </div>
-              ))}
-            </div>
-          </>)}
-
-          {/* Purchase list */}
-          <span style={{...S.lbl,marginTop:8}}>Purchases <span style={{textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11}}>(tap to edit)</span></span>
-          {viewWExps.length===0
-            ?<div style={{textAlign:"center",padding:"50px 20px",color:"var(--muted)"}}>
-               <div style={{fontSize:44,marginBottom:12}}>🧾</div>
-               <div style={{fontSize:16,fontWeight:700,marginBottom:4}}>Nothing here</div>
-               <div style={{fontSize:13}}>{viewWeekOffset===0?"Add your first expense from the Add tab":"No purchases recorded this week"}</div>
-             </div>
-            :<div style={{...S.card,overflow:"hidden"}}>
-               {viewWExps.map(exp=>{
-                 const c=catById(exp.category||"other");
-                 return (
-                   <div key={exp.id} className="row" onClick={()=>startEdit(exp)} style={{display:"flex",alignItems:"center",padding:"13px 16px",borderBottom:"1px solid var(--border)",gap:12,cursor:"pointer"}}>
-                     <div style={{width:40,height:40,borderRadius:12,flexShrink:0,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{c.emoji}</div>
-                     <div style={{flex:1,minWidth:0}}>
-                       <div style={{fontSize:15,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{exp.where}</div>
-                       <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>
-                         {exp.by==="p1"?names.p1:names.p2} · {shortDate(exp.ts)}
-                         {exp.frequency&&exp.frequency!=="once"&&<span style={{marginLeft:6,color:c.color,fontWeight:600}}>↻ {exp.frequency}</span>}
-                         {exp.unexpected&&<span style={{marginLeft:6,color:"var(--amber)",fontWeight:700}}>⚠️ unexpected</span>}
-                       </div>
-                       {exp.note&&<div style={{fontSize:12,color:"var(--muted)",marginTop:3,fontStyle:"italic"}}>"{exp.note}"</div>}
-                     </div>
-                     <div style={{fontSize:17,fontWeight:800,color:"var(--text)",flexShrink:0}}>{nzd(exp.amt)}</div>
-                     <button onClick={e=>{e.stopPropagation();setModal({type:"delete",id:exp.id});}} style={{background:"none",border:"none",cursor:"pointer",color:"#C6C3B8",fontSize:22,padding:"0 0 0 6px",flexShrink:0,lineHeight:1}}>×</button>
-                   </div>
-                 );
-               })}
-             </div>
-          }
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════
-          BUDGET TAB
-      ══════════════════════════════════════════════════════ */}
-      {tab==="budget" && (
-        <div key="budget" className="tab-anim" style={S.page}>
-
-          {/* Month nav */}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
-            <button onClick={()=>setBudgetMo(prevMo(budgetMo))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>‹</button>
-            <div style={{...S.title,marginBottom:0,textAlign:"center"}}>{moLabel(budgetMo)}</div>
-            <button onClick={()=>setBudgetMo(nextMo(budgetMo))} disabled={budgetMo>=curMo()} style={{background:"none",border:"none",cursor:"pointer",color:budgetMo>=curMo()?"var(--border)":"var(--muted)",fontSize:26,padding:"4px 10px",lineHeight:1}}>›</button>
-          </div>
-
-          {/* Income & Savings */}
-          {(()=>{
-            const monthEnd = `${budgetMo}-32`;
-            const r1 = incomeAt(income,"p1",monthEnd), r2 = incomeAt(income,"p2",monthEnd);
-            const nowR1 = incomeAt(income,"p1",new Date().toISOString()), nowR2 = incomeAt(income,"p2",new Date().toISOString());
-            const sideIncomeMo = sideIncome.filter(s=>s.ts.startsWith(budgetMo)).reduce((a,s)=>a+s.amt,0);
-            const totalIncomeMo = (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0) + sideIncomeMo;
-            const totalSpentMo  = bmoExps.reduce((a,e)=>a+e.amt,0);
-            const net = totalIncomeMo - totalSpentMo;
-            const hasIncome = incomeHist(income,"p1").length>0 || incomeHist(income,"p2").length>0 || sideIncome.length>0;
-            const unexpectedSpentMo = bmoExps.filter(e=>e.unexpected).reduce((a,e)=>a+e.amt,0);
-            const bufferTarget = buffer?.amt || 0;
-            const bufferRemaining = bufferTarget - unexpectedSpentMo;
-            return (
-              <div style={{...S.card,padding:20,marginBottom:14}}>
-                <div style={{fontSize:13,fontWeight:700,color:"var(--muted)",marginBottom:14}}>Income & Savings</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                  {[["p1",names.p1,"var(--p1)",nowR1],["p2",names.p2,"var(--p2)",nowR2]].map(([k,label,cv,inc])=>{
-                    return (
-                      <button key={k} onClick={()=>{setDraftIncome(inc?{amt:String(inc.amt),freq:inc.freq}:{amt:"",freq:"monthly"});setModal({type:"income",who:k});}}
-                        style={{textAlign:"left",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer"}}>
-                        <div style={{fontSize:11,fontWeight:700,color:cv,textTransform:"uppercase",letterSpacing:".06em",marginBottom:5}}>{label}</div>
-                        {inc
-                          ? <><div style={{fontSize:18,fontWeight:800,color:"var(--text)"}}>{nzd(inc.amt)}</div>
-                              <div style={{fontSize:11,color:"var(--muted)",marginTop:1}}>per {inc.freq==="fortnightly"?"fortnight":inc.freq.replace("ly","")}</div>
-                            </>
-                          : <div style={{fontSize:13,color:"var(--muted)",marginTop:2}}>Tap to add income</div>
-                        }
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Side hustle row */}
-                <button onClick={()=>{setDraftSide({by:"p1",amt:"",note:""});setModal({type:"sideIncome"});}}
-                  style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer",marginBottom:12}}>
-                  <div>
-                    <div style={{fontSize:11,fontWeight:700,color:"var(--green)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>💪 Side hustle</div>
-                    <div style={{fontSize:13,color:"var(--muted)"}}>{sideIncomeMo>0?`${nzd(sideIncomeMo)} this month`:"Tap to log income"}</div>
-                  </div>
-                  <span style={{fontSize:20,color:"var(--green)",fontWeight:300}}>＋</span>
-                </button>
-
-                {/* Unexpected buffer row */}
-                <button onClick={()=>{setDraftBuffer(buffer?String(buffer.amt):"");setModal({type:"buffer"});}}
-                  style={{width:"100%",textAlign:"left",background:"var(--surf2)",border:"none",borderRadius:14,padding:"12px 14px",cursor:"pointer",marginBottom:hasIncome?16:0}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:bufferTarget>0?6:0}}>
-                    <span style={{fontSize:11,fontWeight:700,color:"var(--amber)",textTransform:"uppercase",letterSpacing:".06em"}}>⚠️ Unexpected buffer</span>
-                    {bufferTarget>0&&<span style={{fontSize:12,fontWeight:700,color:bufferRemaining>=0?"var(--green)":"var(--red)"}}>{bufferRemaining>=0?`${nzd(bufferRemaining)} left`:`${nzd(bufferRemaining)} over`}</span>}
-                  </div>
-                  {bufferTarget>0
-                    ? <>
-                        <div style={{background:"var(--border)",borderRadius:99,height:5,marginBottom:4}}>
-                          <div style={{background:bufferRemaining>=0?"var(--green)":"var(--red)",borderRadius:99,height:5,width:`${Math.min((unexpectedSpentMo/bufferTarget)*100,100)}%`,transition:"width .4s"}}/>
-                        </div>
-                        <div style={{fontSize:11,color:"var(--muted)"}}>{nzd(unexpectedSpentMo)} spent of {nzd(bufferTarget)} target</div>
-                      </>
-                    : <div style={{fontSize:13,color:"var(--muted)"}}>Tap to set a monthly target</div>
-                  }
-                </button>
-
-                {hasIncome && <>
-                  <div style={{borderTop:"1px solid var(--border)",paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                    <div>
-                      <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>Income this month</div>
-                      <div style={{fontSize:20,fontWeight:800,color:"var(--text)"}}>{nzd(totalIncomeMo)}</div>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:13,color:"var(--muted)",fontWeight:600}}>{net>=0?"Left over":"Overspent"}</div>
-                      <div style={{fontSize:20,fontWeight:800,color:net>=0?"var(--green)":"var(--red)"}}>{nzd(net)}</div>
-                    </div>
-                  </div>
-                </>}
-              </div>
-            );
-          })()}
-
-          {/* Monthly overview */}
-          {(()=>{
-            const totalSpent    = bmoExps.reduce((a,e)=>a+e.amt,0);
-            const lastMoSpent   = lastMoExp.reduce((a,e)=>a+e.amt,0);
-            const totalBudgetMo = Object.values(budgets).reduce((a,b)=>a+b,0);
-            const p = pct(totalSpent,totalBudgetMo);
-            const diff = lastMoSpent>0 ? totalSpent-lastMoSpent : null;
-            return (
-              <div style={{...S.card,padding:20,marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-                  <div>
-                    <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>Total spent</div>
-                    <div style={{fontSize:34,fontWeight:800,color:"var(--text)",letterSpacing:"-1px"}}>{nzd(totalSpent)}</div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:4}}>
-                      {totalBudgetMo>0&&<span style={{fontSize:12,color:"var(--muted)"}}>of {nzd(totalBudgetMo)} budget</span>}
-                      {diff!==null&&<span style={{fontSize:12,fontWeight:700,color:diff>0?"var(--amber)":"var(--green)"}}>
-                        {diff>0?`↑ ${nzd(diff)}`:`↓ ${nzd(diff)}`} vs {shortMo(prevMo(budgetMo))}
-                      </span>}
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:13,color:"var(--muted)",fontWeight:600,marginBottom:4}}>{bmoExps.length} purchases</div>
-                    <div style={{fontSize:20,fontWeight:800,color:Math.abs(getBal(splittable(bmoExps)))<0.01?"var(--green)":"var(--amber)"}}>
-                      {Math.abs(getBal(splittable(bmoExps)))<0.01?"✓":nzd(getBal(splittable(bmoExps)))}
-                    </div>
-                    <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{Math.abs(getBal(splittable(bmoExps)))<0.01?"square":balLabel(getBal(splittable(bmoExps)))}</div>
-                  </div>
-                </div>
-                {totalBudgetMo>0&&<>
-                  <div style={{background:"var(--border)",borderRadius:99,height:8,marginBottom:6}}>
-                    <div style={{background:barColor(p),borderRadius:99,height:8,width:`${p}%`,transition:"width .4s ease"}}/>
-                  </div>
-                  <div style={{fontSize:12,color:"var(--muted)",textAlign:"right"}}>{p}% of monthly budget used</div>
-                </>}
-                {totalBudgetMo===0&&<div style={{fontSize:13,color:"var(--muted)",textAlign:"center",paddingTop:4}}>Tap categories below to set monthly budgets</div>}
-              </div>
-            );
-          })()}
-
-          {/* 6-month trend chart */}
-          {(()=>{
-            const months = last6Months();
-            const totals = months.map(m => moExps(exps,m).reduce((a,e)=>a+e.amt,0));
-            const max = Math.max(...totals, 1);
-            return (
-              <div style={{...S.card,padding:"18px 18px 14px",marginBottom:14}}>
-                <div style={{fontSize:13,fontWeight:700,color:"var(--muted)",marginBottom:16}}>Last 6 months</div>
-                <div style={{display:"flex",alignItems:"flex-end",gap:8,height:100,marginBottom:8}}>
-                  {months.map((m,i)=>{
-                    const isCur = m===budgetMo;
-                    const h = Math.max((totals[i]/max)*100, totals[i]>0?6:2);
-                    return (
-                      <div key={m} onClick={()=>setBudgetMo(m)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",height:"100%",cursor:"pointer"}}>
-                        <div style={{fontSize:11,fontWeight:700,color:isCur?"var(--p1)":"var(--muted)",marginBottom:6,opacity:totals[i]>0?1:0.4}}>
-                          {totals[i]>0?nzd(totals[i]).replace("$",""):""}
-                        </div>
-                        <div style={{width:"100%",maxWidth:34,borderRadius:8,background:isCur?"var(--p1)":"var(--surf2)",height:`${h}%`,transition:"height .5s cubic-bezier(.2,.8,.2,1), background .2s",border:isCur?"none":"1.5px solid var(--border)"}}/>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  {months.map(m=>(
-                    <div key={m} style={{flex:1,textAlign:"center",fontSize:11,fontWeight:m===budgetMo?700:500,color:m===budgetMo?"var(--p1)":"var(--muted)"}}>{shortMo(m)}</div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Annual total */}
-          {(()=>{
-            const yr = budgetMo.slice(0,4);
-            const yrExps = exps.filter(e=>yearOf(e.ts)===yr);
-            const yrTotal = yrExps.reduce((a,e)=>a+e.amt,0);
-            if (yrExps.length===0) return null;
-            const monthsElapsed = yr===curMo().slice(0,4) ? (new Date().getMonth()+1) : 12;
-            let yrRegularIncome = 0;
-            for (let m=1; m<=monthsElapsed; m++) {
-              const moStr = `${yr}-${String(m).padStart(2,"0")}-32`;
-              const r1 = incomeAt(income,"p1",moStr), r2 = incomeAt(income,"p2",moStr);
-              yrRegularIncome += (r1?monthlyEquiv(r1.amt,r1.freq):0) + (r2?monthlyEquiv(r2.amt,r2.freq):0);
-            }
-            const yrSideIncome = sideIncome.filter(s=>yearOf(s.ts)===yr).reduce((a,s)=>a+s.amt,0);
-            const yrIncome = yrRegularIncome + yrSideIncome;
-            const hasIncome = incomeHist(income,"p1").length>0 || incomeHist(income,"p2").length>0 || sideIncome.length>0;
-            const yrSavings = yrIncome - yrTotal;
-            return (
-              <div style={{...S.card,padding:"16px 20px",marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>{yr} total so far</div>
-                    <div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{yrExps.length} purchases this year</div>
-                  </div>
-                  <div style={{fontSize:24,fontWeight:800,color:"var(--text)"}}>{nzd(yrTotal)}</div>
-                </div>
-                {hasIncome && <>
-                  <div style={{borderTop:"1px solid var(--border)",marginTop:14,paddingTop:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>Income {yr}</div>
-                      <div style={{fontSize:16,fontWeight:800,color:"var(--text)",marginTop:2}}>{nzd(yrIncome)}</div>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>{yrSavings>=0?"Saved":"Overspent"}</div>
-                      <div style={{fontSize:16,fontWeight:800,color:yrSavings>=0?"var(--green)":"var(--red)",marginTop:2}}>{nzd(yrSavings)}</div>
-                    </div>
-                  </div>
-                </>}
-              </div>
-            );
-          })()}
-
-          {/* Per-category */}
-          <span style={S.lbl}>By category — tap to set budget</span>
-          <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-            {CATS.map(c=>{
-              const spent    = bmoExps.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
-              const lastSpent= lastMoExp.filter(e=>(e.category||"other")===c.id).reduce((a,e)=>a+e.amt,0);
-              const budget   = budgets[c.id]||0;
-              const p        = pct(spent,budget);
-              const trend    = lastSpent>0 ? Math.round(((spent-lastSpent)/lastSpent)*100) : null;
-              if (spent===0&&!budget) return null;
-              return (
-                <button key={c.id} className="budget-row" onClick={()=>{setDraftBudget(budget?String(budget):"");setModal({type:"budget",catId:c.id});}}
-                  style={{display:"flex",alignItems:"center",gap:12,width:"100%",padding:"14px 16px",background:"none",border:"none",borderBottom:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}>
-                  <div style={{width:38,height:38,borderRadius:11,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>{c.emoji}</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <span style={{fontSize:14,fontWeight:600,color:"var(--text)"}}>{c.label}</span>
-                        {trend!==null&&<span style={{fontSize:11,fontWeight:700,color:trend>0?"var(--amber)":"var(--green)",background:trend>0?"#FBEBD3":"#DFF3EA",borderRadius:99,padding:"2px 7px"}}>
-                          {trend>0?`↑${trend}%`:`↓${Math.abs(trend)}%`}
-                        </span>}
-                      </div>
-                      <span style={{fontSize:14,fontWeight:700,color:budget>0?barColor(p):"var(--text)"}}>
-                        {nzd(spent)}{budget>0?` / ${nzd(budget)}`:""}
-                      </span>
-                    </div>
-                    {budget>0
-                      ?<><div style={{background:"var(--border)",borderRadius:99,height:5}}>
-                          <div style={{background:barColor(p),borderRadius:99,height:5,width:`${p}%`,transition:"width .4s"}}/>
-                        </div>
-                        <div style={{fontSize:11,color:"var(--muted)",marginTop:4,textAlign:"right"}}>
-                          {p}%{p>=100?" — over budget ⚠️":p>=80?" — nearly there":""}
-                        </div>
-                       </>
-                      :<div style={{fontSize:12,color:"var(--muted)"}}>No budget set — tap to add one</div>
-                    }
-                  </div>
-                </button>
-              );
-            })}
-            <button className="budget-row" onClick={()=>{setDraftBudget("");setModal({type:"budget",catId:CATS.find(c=>!budgets[c.id])?.id||"other"});}}
-              style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"13px 16px",background:"none",border:"none",cursor:"pointer",color:"var(--muted)"}}>
-              <span style={{fontSize:18}}>＋</span>
-              <span style={{fontSize:14,fontWeight:500}}>Add budget for another category</span>
-            </button>
-          </div>
-
-          {/* Recurring */}
-          {recurringItems.length>0&&(<>
-            <span style={S.lbl}>Monthly recurring</span>
-            <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-              {recurringItems.map(e=>{
-                const c=catById(e.category||"other");
-                return (
-                  <div key={e.id} className="row" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderBottom:"1px solid var(--border)"}}>
-                    <div style={{width:38,height:38,borderRadius:11,background:`${c.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>{c.emoji}</div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:14,fontWeight:600,color:"var(--text)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.where}</div>
-                      <div style={{fontSize:12,color:"var(--muted)",marginTop:1}}>{e.by==="p1"?names.p1:names.p2} · <span style={{color:c.color}}>↻ {e.frequency}</span></div>
-                    </div>
-                    <div style={{textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>{nzd(e.monthlyAmt)}<span style={{fontSize:11,fontWeight:400,color:"var(--muted)"}}>/mo</span></div>
-                    </div>
-                  </div>
-                );
-              })}
-              <div style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",background:"var(--surf2)"}}>
-                <span style={{fontSize:13,fontWeight:600,color:"var(--muted)"}}>Estimated monthly fixed</span>
-                <span style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>{nzd(recurringItems.reduce((a,e)=>a+e.monthlyAmt,0))}<span style={{fontSize:11,fontWeight:400,color:"var(--muted)"}}>/mo</span></span>
-              </div>
-            </div>
-          </>)}
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════════
-          TAB BAR
-      ══════════════════════════════════════════════════════ */}
-      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"var(--surf)",borderTop:"1px solid var(--border)",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
-        {[
-          ["add",    "Add",
-            <svg key="a" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={9}/><line x1={12} y1={8} x2={12} y2={16}/><line x1={8} y1={12} x2={16} y2={12}/></svg>],
-          ["week",   "Week",
-            <svg key="w" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><rect x={3} y={4} width={18} height={18} rx={2}/><line x1={16} y1={2} x2={16} y2={6}/><line x1={8} y1={2} x2={8} y2={6}/><line x1={3} y1={10} x2={21} y2={10}/></svg>],
-          ["budget", "Budget",
-            <svg key="b" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><line x1={18} y1={20} x2={18} y2={10}/><line x1={12} y1={20} x2={12} y2={4}/><line x1={6} y1={20} x2={6} y2={14}/></svg>],
-        ].map(([t,label,icon])=>(
-          <button key={t} className="tab-btn" onClick={()=>setTab(t)}
-            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:tab===t?"var(--p1)":"var(--muted)",fontSize:11,fontWeight:tab===t?700:400}}>
-            {icon}{label}
-          </button>
-        ))}
-      </div>
-
-    </div>
+    Math.round(halfCents / 2) +
+    settlements.reduce((n, s) => n + (s.from === "p2" ? -s.cents : s.cents), 0)
   );
 }
+function incomeHistory(v) {
+  if (!v) return [];
+  if (v.amt !== undefined || v.cents !== undefined)
+    return [{ ...v, from: "2000-01-01" }];
+  return Object.values(v).filter(Boolean);
+}
+function rateAt(v, date) {
+  return incomeHistory(v)
+    .filter((r) => (nzDate(r.from) || "2000-01-01") <= date)
+    .sort((a, b) => nzDate(b.from).localeCompare(nzDate(a.from)) || String(b.createdAt || b.from).localeCompare(String(a.createdAt || a.from)))[0];
+}
+function incomeForPeriod(income, start, end) {
+  let total = 0;
+  for (let d = start; d <= end; d = shiftDate(d, 1))
+    for (const who of ["p1", "p2"]) {
+      const r = rateAt(income[who], d);
+      if (!r) continue;
+      const c = Number.isSafeInteger(r.cents)
+        ? r.cents
+        : Math.round(r.amt * 100);
+      total +=
+        c /
+        (r.freq === "weekly"
+          ? 7
+          : r.freq === "fortnightly"
+            ? 14
+            : daysInMonth(d.slice(0, 7)));
+    }
+  return Math.round(total);
+}
+function outlook(expenses, month, today = nzDate()) {
+  const current = expenses.filter((e) => e.date?.startsWith(month));
+  const fixed = current.filter((e) => e.frequency && e.frequency !== "once");
+  const variable = current.filter(
+    (e) => !e.frequency || e.frequency === "once",
+  );
+  const elapsed =
+    month === today.slice(0, 7) ? Number(today.slice(8)) : daysInMonth(month);
+  // Repeats are not multiplied by the number of days; this is only a variable-spend estimate.
+  return {
+    fixed: sum(fixed),
+    variable: sum(variable),
+    forecast:
+      sum(fixed) + Math.round((sum(variable) / elapsed) * daysInMonth(month)),
+    elapsed,
+  };
+}
+function suggestedBudgets(expenses, month) {
+  const months = [1, 2, 3]
+    .map((n) => shiftMonth(month, -n))
+    .filter((m) => expenses.some((e) => e.date?.startsWith(m)));
+  if (!months.length) return null;
+  return Object.fromEntries(
+    CATS.map((c) => [
+      c.id,
+      Math.ceil(
+        sum(
+          expenses.filter(
+            (e) => months.includes(e.date?.slice(0, 7)) && e.category === c.id,
+          ),
+        ) /
+          months.length /
+          1000,
+      ) * 10,
+    ]),
+  );
+}
+function cleanRecord(r) {
+  const { _key, _raw, ...rest } = r;
+  return rest;
+}
+function same(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  const ak = Object.keys(a).sort(),
+    bk = Object.keys(b).sort();
+  return (
+    ak.length === bk.length &&
+    ak.every((k, i) => k === bk[i] && same(a[k], b[k]))
+  );
+}
+if (typeof module !== "undefined")
+  module.exports = {
+    nzDate,
+    validDate,
+    shiftDate,
+    weekOf,
+    shiftMonth,
+    parseMoney,
+    records,
+    balanceOf,
+    incomeForPeriod,
+    outlook,
+    suggestedBudgets,
+    same,
+  };
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
-</body>
+    <script>
+      "use strict";
+      const CONFIG = {
+        apiKey: "AIzaSyDSnrvUcXuOvF3f4uR4RLNt_ZunntQaFBA",
+        authDomain: "nick-puai-expenses.firebaseapp.com",
+        databaseURL: "https://nick-puai-expenses-default-rtdb.firebaseio.com",
+        projectId: "nick-puai-expenses",
+        storageBucket: "nick-puai-expenses.firebasestorage.app",
+        messagingSenderId: "610510764626",
+        appId: "1:610510764626:web:0b15a873a383667be33d8b",
+      };
+      const PATH = "/tracker-32ae945b1ea1512a226cd186";
+      const root = document.getElementById("root"),
+        dialog = document.getElementById("dialog");
+      const esc = (s) =>
+        String(s ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      const blankExpense = () => ({
+        by: "p1",
+        amt: "",
+        where: "",
+        category: "other",
+        date: nzDate(),
+        note: "",
+        frequency: "once",
+        unexpected: false,
+      });
+      const state = {
+        user: null,
+        data: {},
+        loading: true,
+        error: "",
+        tab: "add",
+        week: weekOf(),
+        month: nzDate().slice(0, 7),
+        search: "",
+        filter: "all",
+        draft: blankExpense(),
+        saving: false,
+        ready: false,
+      };
+      let auth,
+        db,
+        unsubscribe,
+        modalRestore = null,
+        toastTimer,
+        connected = false;
+      function toast(message, undo) {
+        clearTimeout(toastTimer);
+        const el = document.getElementById("toast");
+        el.innerHTML =
+          esc(message) + (undo ? '<button id="undo">Undo</button>' : "");
+        if (undo)
+          el.querySelector("button").onclick = async () => {
+            try {
+              await undo();
+              toast("Undone.");
+            } catch (e) {
+              toast(e.message);
+            }
+          };
+        toastTimer = setTimeout(() => (el.innerHTML = ""), undo ? 9000 : 5000);
+      }
+      const name = (who) =>
+        state.data.names?.[who] || (who === "p1" ? "Nick" : "Puai");
+      const exps = () => records(state.data.expenses),
+        settles = () => records(state.data.settlements),
+        sides = () => records(state.data.sideIncome);
+      const freqLabel = {
+        once: "One-off",
+        weekly: "Weekly",
+        fortnightly: "Fortnightly",
+        monthly: "Monthly",
+      };
+      function id() {
+        return "r_" + [...crypto.getRandomValues(new Uint8Array(16))].map(n=>n.toString(16).padStart(2,"0")).join("");
+      }
+      function snapshot(r) {
+        return r ? structuredClone(r._raw) : null;
+      }
+      async function writeRecord(collection, key, next, expected) {
+        if (!state.ready || !connected)
+          throw new Error(
+            "Not connected. Your draft is kept — reconnect and try again.",
+          );
+        // Compare against the server's record, not a page-wide snapshot. Other records are untouched.
+        let conflict = false;
+        const result = await db
+          .ref(PATH + "/" + collection + "/" + key)
+          .transaction(
+            (current) => {
+              conflict = !same(current, expected);
+              if (conflict) return undefined;
+              return next;
+            },
+            undefined,
+            false,
+          );
+        if (!result.committed)
+          throw new Error(
+            "This entry changed on another device. Close and reopen it to review the latest version.",
+          );
+      }
+      async function writeSetting(path, value) {
+        if (!state.ready || !connected)
+          throw new Error(
+            "Not connected. Your draft is kept — reconnect and try again.",
+          );
+        await db.ref(PATH + "/" + path).set(value);
+      }
+      async function runSave(form, task, done) {
+        if (state.saving) return;
+        const err = form.querySelector(".error");
+        err.textContent = "";
+        state.saving = true;
+        form.querySelectorAll("button").forEach((b) => (b.disabled = true));
+        updateStatus();
+        try {
+          if (!state.ready || !connected) throw new Error("Not connected. Your draft is kept — reconnect and try again.");
+          await task();
+          state.saving = false;
+          done();
+        } catch (e) {
+          err.textContent =
+            e.message || "Could not save. Your draft is kept — try again.";
+        } finally {
+          state.saving = false;
+          form.querySelectorAll("button").forEach((b) => (b.disabled = false));
+          updateStatus();
+        }
+      }
+      function updateStatus() {
+        const el = document.getElementById("sync-status");
+        if (el)
+          el.textContent = state.saving
+            ? "Saving…"
+            : connected
+              ? "Connected"
+              : "Offline · drafts kept";
+      }
+      function openModal(title, body, binder) {
+        modalRestore = document.activeElement;
+        dialog.innerHTML =
+          '<div class="dialog-content"><div class="dialog-head"><h2>' +
+          esc(title) +
+          '</h2><button type="button" aria-label="Close dialog" id="close-modal">×</button></div>' +
+          body +
+          "</div>";
+        dialog.querySelector("#close-modal").onclick = () => dialog.close();
+        if (!dialog.open) dialog.showModal();
+        binder?.();
+      }
+      dialog.addEventListener("close", () => {
+        if (modalRestore?.isConnected) modalRestore.focus();
+        render();
+      });
+      dialog.addEventListener("cancel", (e) => {
+        if (state.saving) e.preventDefault();
+      });
+      dialog.addEventListener("click", (e) => {
+        if (e.target === dialog && !state.saving) dialog.close();
+      });
+      const errorBox = '<div class="error" role="alert"></div>';
+      function people(selected, prefix, verb = "Who paid?") {
+        return (
+          "<fieldset><legend>" +
+          verb +
+          '</legend><div class="people">' +
+          ["p1", "p2"]
+            .map(
+              (w) =>
+                '<div><input id="' +
+                prefix +
+                w +
+                '" type="radio" name="by" value="' +
+                w +
+                '" ' +
+                (selected === w ? "checked" : "") +
+                ' required><label for="' +
+                prefix +
+                w +
+                '">' +
+                esc(name(w)) +
+                "</label></div>",
+            )
+            .join("") +
+          "</div></fieldset>"
+        );
+      }
+      function expenseFields(d, prefix, editing = false) {
+        return (
+          '<div class="field"><label for="' +
+          prefix +
+          'amount">Amount (NZD)</label><div class="amount-field"><span aria-hidden="true">$</span><input id="' +
+          prefix +
+          'amount" name="amt" inputmode="decimal" value="' +
+          esc(d.amt) +
+          '" placeholder="0.00" required autocomplete="off"></div></div>' +
+          people(d.by, prefix) +
+          '<div class="field"><label for="' +
+          prefix +
+          'where">Merchant or description</label><input id="' +
+          prefix +
+          'where" name="where" value="' +
+          esc(d.where) +
+          '" placeholder="PAK’nSAVE, power bill…" list="merchants" maxlength="120"></div>' +
+          '<fieldset><legend>Category</legend><div class="people category-pills">' +
+          CATS.map(
+            (c) =>
+              '<div><input id="' +
+              prefix +
+              c.id +
+              '" name="category" type="radio" value="' +
+              c.id +
+              '" ' +
+              (d.category === c.id ? "checked" : "") +
+              '><label for="' +
+              prefix +
+              c.id +
+              '">' +
+              c.icon +
+              " " +
+              esc(c.label) +
+              "</label></div>",
+          ).join("") +
+          "</div></fieldset>" +
+          "<details " +
+          (editing ? "open" : "") +
+          "><summary>More details · " +
+          esc(dateLabel(d.date)) +
+          (d.frequency !== "once" ? " · " + freqLabel[d.frequency] : "") +
+          '</summary><div class="fields"><div><label for="' +
+          prefix +
+          'date">Paid on</label><input id="' +
+          prefix +
+          'date" type="date" name="date" value="' +
+          esc(d.date) +
+          '" required></div><div><label for="' +
+          prefix +
+          'freq">Repeat</label><select id="' +
+          prefix +
+          'freq" name="frequency">' +
+          Object.entries(freqLabel)
+            .map(
+              ([k, v]) =>
+                '<option value="' +
+                k +
+                '" ' +
+                (k === d.frequency ? "selected" : "") +
+                ">" +
+                v +
+                "</option>",
+            )
+            .join("") +
+          '</select></div></div><div class="field"><label for="' +
+          prefix +
+          'note">Note</label><input id="' +
+          prefix +
+          'note" name="note" value="' +
+          esc(d.note || "") +
+          '" maxlength="500" placeholder="Optional detail"></div><div class="check"><input id="' +
+          prefix +
+          'unexpected" name="unexpected" type="checkbox" ' +
+          (d.unexpected ? "checked" : "") +
+          '><label for="' +
+          prefix +
+          'unexpected">Unexpected expense</label></div><p class="footer-note">Repeats become quick-add shortcuts. They do not create purchases automatically. Housing stays outside the 50/50 balance.</p></details>'
+        );
+      }
+      function readExpense(form) {
+        const f = new FormData(form),
+          date = f.get("date");
+        if (!validDate(date)) throw new Error("Choose a valid purchase date.");
+        if (!["p1", "p2"].includes(f.get("by")))
+          throw new Error("Choose who paid.");
+        const cents = parseMoney(f.get("amt"));
+        return {
+          by: f.get("by"),
+          cents,
+          amt: cents / 100,
+          where: String(f.get("where")).trim() || "Unspecified",
+          category: f.get("category") || "other",
+          date,
+          week: weekOf(date),
+          note: String(f.get("note")).trim() || null,
+          frequency: f.get("frequency"),
+          unexpected: f.has("unexpected"),
+        };
+      }
+      function rememberDraft(form) {
+        const f = new FormData(form);
+        state.draft = {
+          by: f.get("by") || "p1",
+          amt: f.get("amt"),
+          where: f.get("where"),
+          category: f.get("category") || "other",
+          date: f.get("date"),
+          note: f.get("note"),
+          frequency: f.get("frequency"),
+          unexpected: f.has("unexpected"),
+        };
+      }
+      function recurringItems() {
+        const seen = new Map();
+        exps()
+          .filter((e) => e.frequency && e.frequency !== "once")
+          .forEach((e) => {
+            const k = [
+              e.by,
+              e.category,
+              e.where.toLowerCase(),
+              e.frequency,
+            ].join("|");
+            if (!seen.has(k)) seen.set(k, e);
+          });
+        return [...seen.values()];
+      }
+      function merchantList() {
+        return [
+          ...new Set(
+            exps()
+              .filter((e) => e.where && e.where !== "Unspecified")
+              .map((e) => e.where),
+          ),
+        ].slice(0, 100);
+      }
+      function render() {
+        if (!state.user) {
+          renderLogin();
+          return;
+        }
+        if (state.loading) {
+          root.innerHTML =
+            '<div class="wrap"><p>Loading your household…</p></div>';
+          return;
+        }
+        if (state.error) {
+          root.innerHTML =
+            '<div class="wrap"><div class="card"><h1>Could not load your tracker</h1><p>' +
+            esc(state.error) +
+            '</p><button onclick="location.reload()">Retry</button><button id="error-signout">Sign out</button></div></div>';
+          document.getElementById("error-signout").onclick = () =>
+            auth.signOut();
+          return;
+        }
+        root.innerHTML =
+          '<div class="wrap"><header class="top"><div class="brand">house<span>hold</span></div><div class="top-right"><span id="sync-status" class="status"></span><button id="settings" aria-label="Settings and exports">Settings</button></div></header><div class="shell"><nav class="nav" aria-label="Main navigation">' +
+          [
+            ["add", "＋", "Add"],
+            ["week", "◫", "Week"],
+            ["plan", "◌", "Plan"],
+          ]
+            .map(
+              ([t, i, l]) =>
+                '<button data-tab="' +
+                t +
+                '" class="' +
+                (state.tab === t ? "active" : "") +
+                '" ' +
+                (state.tab === t ? 'aria-current="page"' : "") +
+                ">" +
+                i +
+                " " +
+                l +
+                "</button>",
+            )
+            .join("") +
+          '<small>NZD · Thursday weeks<br>Household 3.0</small></nav><main id="main"></main></div></div><datalist id="merchants">' +
+          merchantList()
+            .map((x) => '<option value="' + esc(x) + '"></option>')
+            .join("") +
+          "</datalist>";
+        root.querySelectorAll("[data-tab]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const form = document.getElementById("add-form");
+              if (form) rememberDraft(form);
+              state.tab = b.dataset.tab;
+              render();
+              window.scrollTo(0, 0);
+            }),
+        );
+        document.getElementById("settings").onclick = settingsModal;
+        ({ add: renderAdd, week: renderWeek, plan: renderPlan })[state.tab]();
+        updateStatus();
+      }
+      function renderAdd() {
+        const balance = balanceOf(exps(), settles()),
+          regulars = recurringItems();
+        document.getElementById("main").innerHTML =
+          '<div class="page-head"><div><h1>New expense</h1><p class="muted intro">A quick record. A clearer picture.</p></div></div><div class="columns"><section class="card"><form id="add-form">' +
+          errorBox +
+          expenseFields(state.draft, "add-") +
+          '<div class="sticky-save"><button type="submit" class="primary wide entry-submit">Save expense</button></div></form></section><aside><section class="card"><div class="eyebrow">Running balance</div><h2>' +
+          esc(
+            balance === 0
+              ? "All square"
+              : name(balance > 0 ? "p2" : "p1") +
+                  " owes " +
+                  name(balance > 0 ? "p1" : "p2"),
+          ) +
+          '</h2><div class="split"><b style="font-size:26px">' +
+          money(Math.abs(balance)) +
+          '</b><button id="record-payment">Record payment</button></div><p class="footer-note">All shared purchases, less recorded payments. Housing excluded.</p><button class="inline-link" id="all-payments">Payment history</button></section><section class="card"><h2>Quick add recurring</h2><p class="muted small">Start with a regular purchase.</p>' +
+          (regulars.length
+            ? regulars
+                .slice(0, 8)
+                .map(
+                  (e) =>
+                    '<button class="list-row" data-quick="' +
+                    esc(e._key) +
+                    '"><span class="icon">' +
+                    categoryOf(e.category).icon +
+                    '</span><span class="grow"><b>' +
+                    esc(e.where) +
+                    '</b><span class="small muted">' +
+                    esc(name(e.by)) +
+                    " · " +
+                    freqLabel[e.frequency] +
+                    '</span></span><span class="money">' +
+                    money(e.cents) +
+                    "</span></button>",
+                )
+                .join("")
+            : '<p class="notice">Choose Weekly, Fortnightly or Monthly under More details to create a shortcut.</p>') +
+          "</section></aside></div>";
+        const form = document.getElementById("add-form");
+        form.oninput = () => rememberDraft(form);
+        form.querySelector('[name="where"]').onchange = () => {
+          const old = exps().find(
+            (e) =>
+              e.where.toLowerCase() ===
+              form.elements.where.value.trim().toLowerCase(),
+          );
+          if (old) {
+            form.querySelector(
+              '[name="category"][value="' + old.category + '"]',
+            ).checked = true;
+            rememberDraft(form);
+          }
+        };
+        form.onsubmit = (e) => {
+          e.preventDefault();
+          rememberDraft(form);
+          let saved, key;
+          runSave(
+            form,
+            async () => {
+              const v = readExpense(form);
+              key = id();
+              saved = {
+                ...v,
+                id: key,
+                ts: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+              };
+              await writeRecord("expenses", key, saved, null);
+            },
+            () => {
+              const payer = state.draft.by;
+              state.draft = { ...blankExpense(), by: payer };
+              render();
+              toast(
+                "Saved " +
+                  money(saved.cents) +
+                  " · " +
+                  categoryOf(saved.category).label +
+                  " · " +
+                  name(saved.by),
+                () => writeRecord("expenses", key, null, saved),
+              );
+            },
+          );
+        };
+        document.querySelectorAll("[data-quick]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              const r = regulars.find((e) => e._key === b.dataset.quick);
+              state.draft = {
+                ...blankExpense(),
+                by: r.by,
+                amt: (r.cents / 100).toFixed(2),
+                where: r.where === "Unspecified" ? "" : r.where,
+                category: r.category,
+                note: r.note || "",
+                frequency: r.frequency,
+              };
+              renderAdd();
+              document.querySelector("#add-amount").focus();
+            }),
+        );
+        document.getElementById("record-payment").onclick = () =>
+          paymentModal();
+        document.getElementById("all-payments").onclick = () =>
+          historyModal("settlements");
+      }
+      function editExpense(r) {
+        const expected = snapshot(r),
+          draft = {
+            ...r,
+            amt: (r.cents / 100).toFixed(2),
+            where: r.where === "Unspecified" ? "" : r.where,
+          };
+        openModal(
+          "Edit expense",
+          '<form id="edit-form">' +
+            errorBox +
+            expenseFields(draft, "edit-", true) +
+            '<div class="form-actions"><button type="button" class="danger" id="delete-entry">Delete</button><button type="submit" class="primary">Save changes</button></div></form>',
+          () => {
+            const form = document.getElementById("edit-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const next = {
+                    ...expected,
+                    ...readExpense(form),
+                    updatedAt: new Date().toISOString(),
+                  };
+                  await writeRecord("expenses", r._key, next, expected);
+                },
+                () => {
+                  dialog.close();
+                  toast("Expense updated.");
+                },
+              );
+            };
+            document.getElementById("delete-entry").onclick = () =>
+              deleteModal("expenses", r);
+          },
+        );
+      }
+      function deleteModal(collection, r) {
+        const expected = snapshot(r);
+        openModal(
+          "Delete this entry?",
+          '<form id="delete-form">' +
+            errorBox +
+            "<p>" +
+            esc(r.where || r.note || "Recorded payment") +
+            " · " +
+            money(r.cents) +
+            '</p><p class="muted">This changes your totals. You can undo immediately afterwards.</p><div class="form-actions"><button type="button" id="cancel-delete">Keep entry</button><button class="primary" type="submit">Delete entry</button></div></form>',
+          () => {
+            document.getElementById("cancel-delete").onclick = () =>
+              dialog.close();
+            const form = document.getElementById("delete-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                () => writeRecord(collection, r._key, null, expected),
+                () => {
+                  dialog.close();
+                  toast("Entry deleted.", () =>
+                    writeRecord(collection, r._key, expected, null),
+                  );
+                },
+              );
+            };
+          },
+        );
+      }
+      function purchaseRow(e) {
+        return (
+          '<button class="list-row" data-edit="' +
+          esc(e._key) +
+          '"><span class="icon">' +
+          categoryOf(e.category).icon +
+          '</span><span class="grow"><b>' +
+          esc(e.where) +
+          '</b><span class="small muted">' +
+          esc(name(e.by)) +
+          " · " +
+          categoryOf(e.category).label +
+          (e.frequency && e.frequency !== "once" ? " · ↻" : "") +
+          (e.unexpected ? " · Unexpected" : "") +
+          "</span>" +
+          (e.note
+            ? '<span class="small muted">' + esc(e.note) + "</span>"
+            : "") +
+          '</span><span class="money">' +
+          money(e.cents) +
+          "</span></button>"
+        );
+      }
+      function bindPurchases() {
+        document
+          .querySelectorAll("[data-edit]")
+          .forEach(
+            (b) =>
+              (b.onclick = () =>
+                editExpense(exps().find((e) => e._key === b.dataset.edit))),
+          );
+      }
+      function renderWeek() {
+        const end = shiftDate(state.week, 6),
+          all = exps().filter((e) => e.date >= state.week && e.date <= end),
+          payments = settles().filter(
+            (s) => s.date >= state.week && s.date <= end,
+          ),
+          side = sides().filter((s) => s.date >= state.week && s.date <= end);
+        const income =
+            incomeForPeriod(state.data.income || {}, state.week, end) +
+            sum(side),
+          cats = CATS.map((c) => ({
+            ...c,
+            total: sum(all.filter((e) => e.category === c.id)),
+          })).filter((c) => c.total);
+        document.getElementById("main").innerHTML =
+          '<div class="page-head"><div><h1>' +
+          dateLabel(state.week) +
+          " – " +
+          dateLabel(end) +
+          '</h1><p class="muted small">Thursday to Wednesday · ' +
+          dateLabel(state.week, { year: "numeric" }) +
+          '</p></div><div class="row-actions"><button id="prev-week" aria-label="Previous week">‹</button><button id="next-week" aria-label="Next week" ' +
+          (state.week >= weekOf() ? "disabled" : "") +
+          '>›</button></div></div><button id="this-week" class="small" style="margin-bottom:14px">This week</button><section class="card"><div class="metrics three"><div class="metric"><small>Total spent</small><b>' +
+          money(sum(all)) +
+          "</b></div>" +
+          ["p1", "p2"]
+            .map(
+              (w) =>
+                '<div class="metric"><small>' +
+                esc(name(w)) +
+                ' paid</small><b style="color:var(--' +
+                (w === "p1" ? "blue" : "purple") +
+                ')">' +
+                money(sum(all.filter((e) => e.by === w))) +
+                "</b></div>",
+            )
+            .join("") +
+          "</div>" +
+          (income
+            ? '<p class="footer-note">Estimated income ' +
+              money(income) +
+              " · " +
+              (income >= sum(all) ? "Left over " : "Overspent ") +
+              money(Math.abs(income - sum(all))) +
+              "</p>"
+            : "") +
+          "</section>" +
+          (cats.length
+            ? '<section class="card"><h2>By category</h2><div class="breakdown">' +
+              cats
+                .map(
+                  (c) =>
+                    '<div><span class="small muted">' +
+                    c.label +
+                    "</span><b>" +
+                    money(c.total) +
+                    "</b></div>",
+                )
+                .join("") +
+              "</div></section>"
+            : "") +
+          '<div class="toolbar"><input id="search" aria-label="Search purchases" placeholder="Search merchant or note…" value="' +
+          esc(state.search) +
+          '"><select id="filter" aria-label="Filter by payer"><option value="all">Both people</option>' +
+          ["p1", "p2"]
+            .map(
+              (w) =>
+                '<option value="' +
+                w +
+                '" ' +
+                (state.filter === w ? "selected" : "") +
+                ">" +
+                esc(name(w)) +
+                "</option>",
+            )
+            .join("") +
+          '</select></div><section class="card"><h2>Purchases <span class="small muted">· tap to edit</span></h2><div id="purchases"></div></section><section class="card"><div class="split"><h2>Payments & side income</h2><button id="side-add">Log income</button></div>' +
+          (payments
+            .map(
+              (s) =>
+                '<button class="list-row" data-payment="' +
+                s._key +
+                '"><span class="icon">✓</span><span class="grow"><b>' +
+                esc(name(s.from)) +
+                " → " +
+                esc(name(s.to)) +
+                '</b><span class="small muted">Payment · ' +
+                dateLabel(s.date) +
+                '</span></span><span class="money">' +
+                money(s.cents) +
+                "</span></button>",
+            )
+            .join("") +
+            side
+              .map(
+                (s) =>
+                  '<button class="list-row" data-side="' +
+                  s._key +
+                  '"><span class="icon">＋</span><span class="grow"><b>' +
+                  esc(s.note || "Side income") +
+                  '</b><span class="small muted">' +
+                  esc(name(s.by)) +
+                  " · " +
+                  dateLabel(s.date) +
+                  '</span></span><span class="money good">' +
+                  money(s.cents) +
+                  "</span></button>",
+              )
+              .join("") ||
+            '<p class="muted small">No payments or side income recorded for this week.</p>') +
+          "</section>";
+        document.getElementById("prev-week").onclick = () => {
+          state.week = shiftDate(state.week, -7);
+          renderWeek();
+        };
+        document.getElementById("next-week").onclick = () => {
+          state.week = shiftDate(state.week, 7);
+          renderWeek();
+        };
+        document.getElementById("this-week").onclick = () => {
+          state.week = weekOf();
+          renderWeek();
+        };
+        function draw() {
+          const q = state.search.toLowerCase(),
+            filtered = all.filter(
+              (e) =>
+                (state.filter === "all" || e.by === state.filter) &&
+                (e.where + " " + (e.note || "")).toLowerCase().includes(q),
+            );
+          let last = "";
+          document.getElementById("purchases").innerHTML =
+            filtered
+              .map((e) => {
+                const heading =
+                  e.date !== last
+                    ? '<div class="day-title">' +
+                      dateLabel(e.date, {
+                        weekday: "long",
+                        day: "numeric",
+                        month: "short",
+                      }) +
+                      "</div>"
+                    : "";
+                last = e.date;
+                return heading + purchaseRow(e);
+              })
+              .join("") ||
+            '<div class="empty">No matching purchases. Add a forgotten expense with its original date.</div>';
+          bindPurchases();
+        }
+        document.getElementById("search").oninput = (e) => {
+          state.search = e.target.value;
+          draw();
+        };
+        document.getElementById("filter").onchange = (e) => {
+          state.filter = e.target.value;
+          draw();
+        };
+        draw();
+        document.getElementById("side-add").onclick = () =>
+          sideModal(null, state.week === weekOf() ? nzDate() : state.week);
+        bindPayments();
+      }
+      function bindPayments() {
+        document
+          .querySelectorAll("[data-payment]")
+          .forEach(
+            (b) =>
+              (b.onclick = () =>
+                paymentModal(
+                  settles().find((s) => s._key === b.dataset.payment),
+                )),
+          );
+        document
+          .querySelectorAll("[data-side]")
+          .forEach(
+            (b) =>
+              (b.onclick = () =>
+                sideModal(sides().find((s) => s._key === b.dataset.side))),
+          );
+      }
+      function paymentModal(r) {
+        const bal = balanceOf(exps(), settles()),
+          expected = snapshot(r),
+          from = r?.from || (bal >= 0 ? "p2" : "p1"),
+          key = r?._key || id();
+        openModal(
+          r ? "Edit recorded payment" : "Record a payment",
+          '<form id="payment-form">' +
+            errorBox +
+            '<p class="notice">Record money already paid between you. This app does not transfer money.</p><div class="field"><label for="payment-from">Paid by</label><select id="payment-from" name="from">' +
+            ["p1", "p2"]
+              .map(
+                (w) =>
+                  '<option value="' +
+                  w +
+                  '" ' +
+                  (from === w ? "selected" : "") +
+                  ">" +
+                  esc(name(w)) +
+                  " → " +
+                  esc(name(w === "p1" ? "p2" : "p1")) +
+                  "</option>",
+              )
+              .join("") +
+            '</select></div><div class="fields"><div><label for="payment-amt">Amount (NZD)</label><input id="payment-amt" name="amt" inputmode="decimal" value="' +
+            ((r?.cents ?? Math.abs(bal)) / 100).toFixed(2) +
+            '" required></div><div><label for="payment-date">Paid on</label><input id="payment-date" name="date" type="date" value="' +
+            (r?.date || nzDate()) +
+            '" required></div></div><p class="footer-note">Use a smaller amount for a partial payment. Current outstanding balance: ' +
+            money(Math.abs(bal)) +
+            '.</p><div class="form-actions">' +
+            (r
+              ? '<button type="button" class="danger" id="delete-payment">Delete</button>'
+              : "") +
+            '<button class="primary" type="submit">' +
+            (r ? "Save correction" : "Confirm payment") +
+            "</button></div></form>",
+          () => {
+            const form = document.getElementById("payment-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const f = new FormData(form),
+                    date = f.get("date"),
+                    cents = parseMoney(f.get("amt"));
+                  if (!validDate(date)) throw new Error("Choose a valid date.");
+                  const from = f.get("from"),
+                    to = from === "p1" ? "p2" : "p1";
+                  const next = {
+                    ...expected,
+                    id: r?.id || key,
+                    from,
+                    to,
+                    cents,
+                    amt: cents / 100,
+                    date,
+                    week: weekOf(date),
+                    ts: r?.ts || new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
+                  };
+                  await writeRecord("settlements", key, next, expected);
+                },
+                () => {
+                  dialog.close();
+                  toast("Payment recorded.");
+                },
+              );
+            };
+            if (r)
+              document.getElementById("delete-payment").onclick = () =>
+                deleteModal("settlements", r);
+          },
+        );
+      }
+      function sideModal(r, initialDate = nzDate()) {
+        const expected = snapshot(r),
+          key = r?._key || id();
+        openModal(
+          r ? "Edit side income" : "Log side income",
+          '<form id="side-form">' +
+            errorBox +
+            people(r?.by || "p1", "side-", "Who earned it?") +
+            '<div class="fields"><div><label for="side-amt">Amount (NZD)</label><input id="side-amt" name="amt" inputmode="decimal" value="' +
+            (r ? (r.cents / 100).toFixed(2) : "") +
+            '" required></div><div><label for="side-date">Received on</label><input id="side-date" name="date" type="date" value="' +
+            (r?.date || initialDate) +
+            '" required></div></div><div class="field"><label for="side-note">Description</label><input id="side-note" name="note" value="' +
+            esc(r?.note || "") +
+            '" placeholder="Freelance work, a sale…" maxlength="500"></div><div class="form-actions">' +
+            (r
+              ? '<button type="button" class="danger" id="delete-side">Delete</button>'
+              : "") +
+            '<button type="submit" class="primary">Save income</button></div></form>',
+          () => {
+            const form = document.getElementById("side-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const f = new FormData(form),
+                    cents = parseMoney(f.get("amt")),
+                    date = f.get("date");
+                  if (!validDate(date)) throw new Error("Choose a valid date.");
+                  await writeRecord(
+                    "sideIncome",
+                    key,
+                    {
+                      ...expected,
+                      id: r?.id || key,
+                      ts: r?.ts || new Date().toISOString(),
+                      date,
+                      week: weekOf(date),
+                      by: f.get("by"),
+                      note: String(f.get("note")).trim() || null,
+                      cents,
+                      amt: cents / 100,
+                    },
+                    expected,
+                  );
+                },
+                () => {
+                  dialog.close();
+                  toast("Side income saved.");
+                },
+              );
+            };
+            if (r)
+              document.getElementById("delete-side").onclick = () =>
+                deleteModal("sideIncome", r);
+          },
+        );
+      }
+      function historyModal(collection) {
+        const list = collection === "settlements" ? settles() : sides();
+        openModal(
+          collection === "settlements"
+            ? "Payment history"
+            : "Side income history",
+          list
+            .map(
+              (s) =>
+                '<button class="list-row" ' +
+                (collection === "settlements" ? "data-payment" : "data-side") +
+                '="' +
+                s._key +
+                '"><span class="grow"><b>' +
+                esc(
+                  collection === "settlements"
+                    ? name(s.from) + " → " + name(s.to)
+                    : s.note || "Side income",
+                ) +
+                '</b><span class="small muted">' +
+                dateLabel(s.date) +
+                '</span></span><span class="money">' +
+                money(s.cents) +
+                "</span></button>",
+            )
+            .join("") || '<p class="muted">No entries yet.</p>',
+          bindPayments,
+        );
+      }
+      function renderPlan() {
+        const month = state.month,
+          current = exps().filter((e) => e.date?.startsWith(month)),
+          spent = sum(current),
+          bud = state.data.budgets || {},
+          planned = Object.values(bud).reduce(
+            (n, v) => n + Math.round(Number(v) * 100),
+            0,
+          ),
+          remaining = planned - spent,
+          now = nzDate(),
+          past = month < now.slice(0, 7),
+          end = month + "-" + daysInMonth(month),
+          income =
+            incomeForPeriod(state.data.income || {}, month + "-01", end) +
+            sum(sides().filter((s) => s.date?.startsWith(month))),
+          out = outlook(exps(), month),
+          suggest = suggestedBudgets(exps(), month),
+          buffer = Math.round(Number(state.data.buffer?.amt || 0) * 100),
+          unexpected = sum(current.filter((e) => e.unexpected));
+        document.getElementById("main").innerHTML =
+          '<div class="page-head"><div><h1>' +
+          monthLabel(month) +
+          '</h1><p class="muted intro">Your month, with a plan.</p></div><div class="row-actions"><button id="prev-month" aria-label="Previous month">‹</button><button id="next-month" aria-label="Next month" ' +
+          (month >= now.slice(0, 7) ? "disabled" : "") +
+          '>›</button></div></div><section class="card hero"><div class="eyebrow">' +
+          (past ? "Month-end budget balance" : "Budget remaining this month") +
+          '</div><div class="large">' +
+          (planned ? money(remaining) : "Build your plan") +
+          '</div><p class="muted small">' +
+          (planned
+            ? remaining < 0
+              ? "Recorded spending is over your category budgets."
+              : "Category budgets less recorded spending. This is not your bank balance."
+            : "Set targets below, or start from your recent spending.") +
+          '</p><div class="metrics"><div class="metric"><small class="muted">Spent</small><b>' +
+          money(spent) +
+          '</b></div><div class="metric"><small class="muted">Planned</small><b>' +
+          money(planned) +
+          '</b></div></div></section><section class="card"><div class="split"><h2>Category budgets</h2><button id="suggest-budgets" ' +
+          (!suggest ? "disabled" : "") +
+          '>Suggest targets</button></div><p class="muted small">Targets apply across all months. Historical spending keeps its original dates.</p>' +
+          CATS.map((c) => {
+            const s = sum(current.filter((e) => e.category === c.id)),
+              b = Math.round((bud[c.id] || 0) * 100),
+              p = b ? Math.min(100, (s / b) * 100) : 0;
+            return (
+              '<div class="list-row"><span class="icon">' +
+              c.icon +
+              '</span><div class="grow"><button class="inline-link" data-cat-purchases="' +
+              c.id +
+              '">' +
+              c.label +
+              '</button><div class="small muted">' +
+              money(s) +
+              " spent" +
+              (b
+                ? " / " + money(b) + " · " + money(b - s) + " remaining"
+                : " · No target") +
+              "</div>" +
+              (b
+                ? '<div class="bar"><span style="width:' +
+                  p +
+                  "%;background:" +
+                  (s > b ? "var(--red)" : "var(--blue)") +
+                  '"></span></div>'
+                : "") +
+              '</div><button data-budget="' +
+              c.id +
+              '" aria-label="Edit ' +
+              c.label +
+              ' budget">' +
+              (b ? money(b) : "Set") +
+              "</button></div>"
+            );
+          }).join("") +
+          (!suggest
+            ? '<p class="footer-note">Suggestions unlock when at least one previous month has purchases.</p>'
+            : "") +
+          '</section><section class="card"><details><summary>Outlook · ' +
+          (past
+            ? "actual spending"
+            : "estimated month-end spend " + money(out.forecast)) +
+          '</summary><div class="metrics"><div class="metric"><small>Fixed / recurring logged</small><b>' +
+          money(out.fixed) +
+          '</b></div><div class="metric"><small>Variable logged</small><b>' +
+          money(out.variable) +
+          '</b></div></div><p class="footer-note">' +
+          (past
+            ? "This month is complete."
+            : "Variable spending is projected from " +
+              out.elapsed +
+              " calendar days. Recurring payments already logged are counted once, so an early rent payment is not multiplied across the month. Upcoming unpaid repeats are not included.") +
+          ' This estimate depends on complete entries; irregular purchases can distort it.</p></details></section><section class="card"><h2>Income & buffer</h2><div class="metrics"><div class="metric"><small>Estimated income</small><b>' +
+          money(income) +
+          '</b></div><div class="metric"><small>' +
+          (income >= spent ? "Estimated left over" : "Spent above estimate") +
+          "</small><b>" +
+          money(Math.abs(income - spent)) +
+          '</b></div></div><p class="footer-note">Regular rates are prorated by effective date. Side income is included. These are estimates, not cash received or savings in a bank account.</p><div class="chips">' +
+          ["p1", "p2"]
+            .map(
+              (w) =>
+                '<button data-income="' +
+                w +
+                '">' +
+                esc(name(w)) +
+                "’s income</button>",
+            )
+            .join("") +
+          '<button id="plan-side">Log side income</button><button id="side-history">View side income</button></div><div class="list-row"><div class="grow"><b>Unexpected buffer</b><div class="small muted">' +
+          (buffer
+            ? money(unexpected) +
+              " spent / " +
+              money(buffer) +
+              " target · " +
+              money(buffer - unexpected) +
+              " remaining"
+            : "Set a monthly target for surprise costs") +
+          '</div></div><button id="buffer">' +
+          (buffer ? "Edit" : "Set") +
+          '</button></div><p class="footer-note">The buffer is a target, not extra money. It is not deducted twice from expenses.</p></section><section class="card"><h2>Last six months</h2><div class="trend">' +
+          (() => {
+            const months = [5, 4, 3, 2, 1, 0].map((n) =>
+                shiftMonth(now.slice(0, 7), -n),
+              ),
+              totals = months.map((m) =>
+                sum(exps().filter((e) => e.date?.startsWith(m))),
+              ),
+              max = Math.max(...totals, 1);
+            return months
+              .map(
+                (m, i) =>
+                  '<button data-month="' +
+                  m +
+                  '" class="' +
+                  (m === month ? "active" : "") +
+                  '" aria-label="' +
+                  monthLabel(m) +
+                  ", " +
+                  money(totals[i]) +
+                  '"><span style="height:' +
+                  Math.max(3, (totals[i] / max) * 70) +
+                  'px"></span>' +
+                  dateLabel(m + "-01", { month: "short" }) +
+                  "</button>",
+              )
+              .join("");
+          })() +
+          "</div></section>" +
+          annualCard(month.slice(0, 4));
+        document.getElementById("prev-month").onclick = () => {
+          state.month = shiftMonth(month, -1);
+          renderPlan();
+        };
+        document.getElementById("next-month").onclick = () => {
+          state.month = shiftMonth(month, 1);
+          renderPlan();
+        };
+        document.querySelectorAll("[data-month]").forEach(
+          (b) =>
+            (b.onclick = () => {
+              state.month = b.dataset.month;
+              renderPlan();
+            }),
+        );
+        document
+          .querySelectorAll("[data-budget]")
+          .forEach((b) => (b.onclick = () => budgetModal(b.dataset.budget)));
+        document
+          .querySelectorAll("[data-cat-purchases]")
+          .forEach(
+            (b) =>
+              (b.onclick = () => categoryPurchases(b.dataset.catPurchases)),
+          );
+        document
+          .querySelectorAll("[data-income]")
+          .forEach((b) => (b.onclick = () => incomeModal(b.dataset.income)));
+        document.getElementById("suggest-budgets").onclick = () =>
+          suggestModal(suggest);
+        document.getElementById("plan-side").onclick = () =>
+          sideModal(null, past ? month + "-01" : nzDate());
+        document.getElementById("side-history").onclick = () =>
+          historyModal("sideIncome");
+        document.getElementById("buffer").onclick = bufferModal;
+      }
+      function annualCard(year) {
+        const current = year === nzDate().slice(0, 4),
+          end = current ? nzDate() : year + "-12-31",
+          spent = sum(exps().filter((e) => e.date?.startsWith(year))),
+          income =
+            incomeForPeriod(state.data.income || {}, year + "-01-01", end) +
+            sum(sides().filter((e) => e.date?.startsWith(year)));
+        return (
+          '<section class="card"><h2>' +
+          year +
+          " " +
+          (current ? "year to date" : "overview") +
+          '</h2><div class="metrics"><div class="metric"><small>Recorded spending</small><b>' +
+          money(spent) +
+          '</b></div><div class="metric"><small>Estimated income</small><b>' +
+          money(income) +
+          "</b></div></div></section>"
+        );
+      }
+      function categoryPurchases(category) {
+        const list = exps().filter(
+          (e) => e.date?.startsWith(state.month) && e.category === category,
+        );
+        openModal(
+          categoryOf(category).label + " · " + monthLabel(state.month),
+          list
+            .map(
+              (e) =>
+                '<div class="day-title">' +
+                dateLabel(e.date) +
+                "</div>" +
+                purchaseRow(e),
+            )
+            .join("") || '<p class="muted">No purchases in this category.</p>',
+          bindPurchases,
+        );
+      }
+      function budgetModal(category) {
+        const c = categoryOf(category),
+          value = state.data.budgets?.[category];
+        openModal(
+          c.label + " budget",
+          '<form id="budget-form">' +
+            errorBox +
+            '<p class="muted">Monthly target. Applies to every month; past spending stays unchanged.</p><div class="field"><label for="budget-amt">Target (NZD)</label><input id="budget-amt" name="amt" inputmode="decimal" value="' +
+            (value ?? "") +
+            '" required></div><div class="form-actions">' +
+            (value !== undefined
+              ? '<button type="button" class="danger" id="remove-budget">Remove target</button>'
+              : "") +
+            '<button class="primary" type="submit">Save target</button></div></form>',
+          () => {
+            const form = document.getElementById("budget-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                () =>
+                  writeSetting(
+                    "budgets/" + category,
+                    parseMoney(form.elements.amt.value, true) / 100,
+                  ),
+                () => {
+                  dialog.close();
+                  toast("Budget saved.");
+                },
+              );
+            };
+            if (value !== undefined)
+              document.getElementById("remove-budget").onclick = () =>
+                runSave(
+                  form,
+                  () => writeSetting("budgets/" + category, null),
+                  () => {
+                    dialog.close();
+                    toast("Target removed.");
+                  },
+                );
+          },
+        );
+      }
+      function suggestModal(suggestion) {
+        const draft = { ...suggestion };
+        openModal(
+          "Start from recent spending",
+          '<form id="suggest-form">' +
+            errorBox +
+            '<p class="muted small">Average of up to three previous months with entries, rounded up to $10. Review the targets; incomplete months may understate spending.</p>' +
+            CATS.map(
+              (c) =>
+                '<div class="field"><label for="suggest-' +
+                c.id +
+                '">' +
+                c.label +
+                '</label><input id="suggest-' +
+                c.id +
+                '" name="' +
+                c.id +
+                '" value="' +
+                draft[c.id] +
+                '" inputmode="decimal"></div>',
+            ).join("") +
+            '<button class="primary wide" type="submit">Apply reviewed targets</button></form>',
+          () => {
+            const form = document.getElementById("suggest-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const patch = {};
+                  for (const c of CATS)
+                    patch["budgets/" + c.id] =
+                      parseMoney(form.elements[c.id].value, true) / 100;
+                  if (!connected) throw new Error("Reconnect before saving.");
+                  await db.ref(PATH).update(patch);
+                },
+                () => {
+                  dialog.close();
+                  toast("Reviewed budgets applied.");
+                },
+              );
+            };
+          },
+        );
+      }
+      function incomeModal(who) {
+        const current = rateAt(state.data.income?.[who], nzDate()),
+          hist = incomeHistory(state.data.income?.[who]),
+          expected = structuredClone(state.data.income?.[who] || null);
+        openModal(
+          name(who) + "’s regular income",
+          '<form id="income-form">' +
+            errorBox +
+            '<p class="muted small">Add a dated rate. Previous rates stay in history. To stop income, add a zero rate from its end date.</p><div class="fields"><div><label for="income-amt">Amount (NZD)</label><input id="income-amt" name="amt" inputmode="decimal" value="' +
+            (current
+              ? (
+                  (current.cents ?? Math.round(current.amt * 100)) / 100
+                ).toFixed(2)
+              : "") +
+            '" required></div><div><label for="income-freq">Paid</label><select id="income-freq" name="freq">' +
+            ["weekly", "fortnightly", "monthly"]
+              .map(
+                (f) =>
+                  '<option value="' +
+                  f +
+                  '" ' +
+                  (current?.freq === f ? "selected" : "") +
+                  ">" +
+                  freqLabel[f] +
+                  "</option>",
+              )
+              .join("") +
+            '</select></div></div><div class="field"><label for="income-from">Effective from</label><input id="income-from" name="from" type="date" value="' +
+            nzDate() +
+            '" required></div><button class="primary wide" type="submit">Add dated rate</button></form><details><summary>Rate history (' +
+            hist.length +
+            ")</summary>" +
+            hist
+              .sort((a, b) => String(b.from).localeCompare(String(a.from)))
+              .map(
+                (r) =>
+                  '<div class="list-row"><span class="grow"><b>' +
+                  money(r.cents ?? Math.round(r.amt * 100)) +
+                  " · " +
+                  freqLabel[r.freq] +
+                  '</b><span class="small muted">From ' +
+                  dateLabel(nzDate(r.from)) +
+                  "</span></span></div>",
+              )
+              .join("") +
+            "</details>",
+          () => {
+            const form = document.getElementById("income-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const f = new FormData(form),
+                    cents = parseMoney(f.get("amt"), true),
+                    from = f.get("from");
+                  if (!validDate(from))
+                    throw new Error("Choose a valid effective date.");
+                  const key = id();
+                  const next = {
+                    amt: cents / 100,
+                    cents,
+                    freq: f.get("freq"),
+                    from,
+                    createdAt: new Date().toISOString(),
+                  };
+                  let conflict = false;
+                  const result = await db
+                    .ref(PATH + "/income/" + who)
+                    .transaction(
+                      (raw) => {
+                        if (!same(raw, expected)) {
+                          conflict = true;
+                          return undefined;
+                        }
+                        let base =
+                          raw?.amt !== undefined
+                            ? { legacy: { ...raw, from: "2000-01-01" } }
+                            : { ...(raw || {}) };
+                        base[key] = next;
+                        return base;
+                      },
+                      undefined,
+                      false,
+                    );
+                  if (!result.committed)
+                    throw new Error(
+                      "Income changed on another device. Reopen this screen before saving.",
+                    );
+                },
+                () => {
+                  dialog.close();
+                  toast("Income rate saved.");
+                },
+              );
+            };
+          },
+        );
+      }
+      function bufferModal() {
+        openModal(
+          "Unexpected buffer",
+          '<form id="buffer-form">' +
+            errorBox +
+            '<p class="muted small">A monthly target for surprise costs. It is included in your spending, not deducted again.</p><div class="field"><label for="buffer-amt">Target (NZD)</label><input id="buffer-amt" name="amt" inputmode="decimal" value="' +
+            (state.data.buffer?.amt || "") +
+            '" required></div><div class="form-actions"><button type="button" class="danger" id="remove-buffer">Remove</button><button type="submit" class="primary">Save target</button></div></form>',
+          () => {
+            const form = document.getElementById("buffer-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                () => {
+                  const cents = parseMoney(form.elements.amt.value, true);
+                  return writeSetting("buffer", { amt: cents / 100, cents });
+                },
+                () => {
+                  dialog.close();
+                  toast("Buffer saved.");
+                },
+              );
+            };
+            document.getElementById("remove-buffer").onclick = () =>
+              runSave(
+                form,
+                () => writeSetting("buffer", null),
+                () => {
+                  dialog.close();
+                  toast("Buffer removed.");
+                },
+              );
+          },
+        );
+      }
+      function download(filename, text, type) {
+        const url = URL.createObjectURL(new Blob([text], { type })),
+          a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      function exportCSV() {
+        const rows = [
+          [
+            "Type",
+            "Date",
+            "Amount NZD",
+            "Category",
+            "Description",
+            "Person",
+            "To",
+            "Frequency",
+            "Unexpected",
+            "Note",
+          ],
+        ];
+        for (const e of exps())
+          rows.push([
+            "Expense",
+            e.date,
+            (e.cents / 100).toFixed(2),
+            categoryOf(e.category).label,
+            e.where,
+            name(e.by),
+            "",
+            e.frequency || "once",
+            e.unexpected ? "yes" : "no",
+            e.note || "",
+          ]);
+        for (const s of settles())
+          rows.push([
+            "Payment",
+            s.date,
+            (s.cents / 100).toFixed(2),
+            "",
+            "",
+            name(s.from),
+            name(s.to),
+            "",
+            "",
+            "",
+          ]);
+        for (const s of sides())
+          rows.push([
+            "Side income",
+            s.date,
+            (s.cents / 100).toFixed(2),
+            "",
+            s.note || "",
+            name(s.by),
+            "",
+            "",
+            "",
+            "",
+          ]);
+        const csv = rows
+          .map((row) =>
+            row
+              .map((v) => {
+                let s = String(v);
+                if (/^[=+@-]/.test(s)) s = "'" + s;
+                return '"' + s.replaceAll('"', '""') + '"';
+              })
+              .join(","),
+          )
+          .join("\r\n");
+        download(
+          "household-" + nzDate() + ".csv",
+          "\uFEFF" + csv,
+          "text/csv;charset=utf-8",
+        );
+      }
+      function settingsModal() {
+        openModal(
+          "Settings & exports",
+          '<form id="names-form">' +
+            errorBox +
+            '<div class="fields">' +
+            ["p1", "p2"]
+              .map(
+                (w) =>
+                  '<div><label for="name-' +
+                  w +
+                  '">' +
+                  (w === "p1" ? "First" : "Second") +
+                  ' person</label><input id="name-' +
+                  w +
+                  '" name="' +
+                  w +
+                  '" value="' +
+                  esc(name(w)) +
+                  '" maxlength="50" required></div>',
+              )
+              .join("") +
+            '</div><button class="primary wide" type="submit">Save names</button></form><div class="list-row"><button id="csv">Export CSV</button><button id="backup">Full JSON backup</button></div><p class="footer-note">JSON includes income history, targets, payments and all original records.</p><p class="notice">Use this version on both devices. Older versions save whole collections and can overwrite newer entries.</p><div class="list-row"><span class="grow small muted">' +
+            esc(state.user.email || "") +
+            '</span><button id="signout">Sign out</button></div><p class="version">Household 3.0 · NZ dates · record-level saves</p>',
+          () => {
+            const form = document.getElementById("names-form");
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              runSave(
+                form,
+                async () => {
+                  const f = new FormData(form),
+                    patch = {};
+                  for (const w of ["p1", "p2"]) {
+                    const v = String(f.get(w)).trim();
+                    if (!v) throw new Error("Enter both names.");
+                    if (v !== name(w)) patch["names/" + w] = v;
+                  }
+                  if (Object.keys(patch).length)
+                    await db.ref(PATH).update(patch);
+                },
+                () => {
+                  dialog.close();
+                  toast("Names saved.");
+                },
+              );
+            };
+            document.getElementById("csv").onclick = exportCSV;
+            document.getElementById("backup").onclick = () =>
+              download(
+                "household-backup-" + nzDate() + ".json",
+                JSON.stringify(state.data, null, 2),
+                "application/json",
+              );
+            document.getElementById("signout").onclick = async () => {
+              try {
+                await auth.signOut();
+                dialog.close();
+              } catch {
+                toast("Could not sign out. Try again.");
+              }
+            };
+          },
+        );
+      }
+      function renderLogin() {
+        root.innerHTML =
+          '<div class="wrap"><section class="card login"><div class="brand">house<span>hold</span></div><h1>Welcome back</h1><p class="muted">Your shared expenses, in one place.</p><form id="login-form">' +
+          errorBox +
+          '<div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><button class="primary wide" type="submit">Sign in</button></form><p class="footer-note">Household 3.0 · Same account and existing records.</p></section></div>';
+        const form = document.getElementById("login-form");
+        form.onsubmit = async (e) => {
+          e.preventDefault();
+          const button = form.querySelector("button"),
+            err = form.querySelector(".error");
+          button.disabled = true;
+          button.textContent = "Signing in…";
+          err.textContent = "";
+          try {
+            await auth.signInWithEmailAndPassword(
+              form.elements.email.value.trim(),
+              form.elements.password.value,
+            );
+          } catch (e) {
+            err.textContent =
+              e.code === "auth/too-many-requests"
+                ? "Too many attempts. Wait a little and try again."
+                : e.code === "auth/network-request-failed"
+                  ? "Check your connection and try again."
+                  : "Could not sign in. Check your email and password.";
+            button.disabled = false;
+            button.textContent = "Sign in";
+          }
+        };
+      }
+      try {
+        firebase.initializeApp(CONFIG);
+        auth = firebase.auth();
+        db = firebase.database();
+        auth
+          .setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+          .catch(() => toast("Your browser may not keep you signed in."));
+        db.ref(".info/connected").on("value", (s) => {
+          connected = !!s.val();
+          updateStatus();
+        });
+        auth.onAuthStateChanged(
+          (user) => {
+            if (unsubscribe) unsubscribe();
+            state.user = user;
+            state.data = {};
+            state.ready = false;
+            state.loading = !!user;
+            state.error = "";
+            state.draft = blankExpense();
+            if (user) {
+              const ref = db.ref(PATH);
+              const onValue = (s) => {
+                state.data = s.val() || {};
+                state.loading = false;
+                state.ready = true;
+                state.error = ""; // Preserve in-progress forms when a partner saves.
+                if (!state.saving && !dialog.open) {
+                  const f = document.getElementById("add-form");
+                  if (f) rememberDraft(f);
+                  render();
+                }
+              };
+              ref.on("value", onValue, (e) => {
+                state.error =
+                  e.code === "PERMISSION_DENIED"
+                    ? "Your account cannot access this household. Check Firebase access rules."
+                    : "Check your connection and try again.";
+                state.loading = false;
+                state.ready = false;
+                render();
+              });
+              unsubscribe = () => ref.off("value", onValue);
+            }
+            render();
+          },
+          () => {
+            root.innerHTML =
+              '<div class="wrap"><p>Could not check sign-in. Reload to try again.</p></div>';
+          },
+        );
+      } catch (e) {
+        root.innerHTML =
+          '<div class="wrap"><section class="card"><h1>Could not start Household</h1><p>Check your internet connection, then reload. The Firebase sign-in libraries need a connection.</p><button onclick="location.reload()">Retry</button></section></div>';
+      }
+    </script>
+  </body>
 </html>

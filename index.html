@@ -5,31 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Expenses">
-  <meta name="theme-color" content="#F7F8FC">
+  <meta name="theme-color" content="#F2F1EC">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <title>Expenses</title>
   <style>
     :root {
-      --bg:     #F7F8FC;
+      --bg:     #F2F1EC;
       --surf:   #FFFFFF;
-      --surf2:  #F1F4F9;
-      --border: #E3E8F1;
-      --text:   #182033;
-      --muted:  #667085;
-      --p1:     #2563EB;
-      --p2:     #7C3AED;
-      --green:  #15803D;
-      --amber:  #B54708;
-      --red:    #C43239;
+      --surf2:  #EBE9E1;
+      --border: #DDDAD0;
+      --text:   #1A1A1F;
+      --muted:  #6E6E78;
+      --p1:     #2F6FED;
+      --p2:     #8A3FEF;
+      --green:  #15915F;
+      --amber:  #B45309;
+      --red:    #C22B3A;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     html, body { height: 100%; background: var(--bg); }
-    body { background: radial-gradient(circle at 50% -20%, #E6EEFF 0, transparent 42%), var(--bg); }
     body { font-family: system-ui, -apple-system, sans-serif; color: var(--text); }
     input, button { font-family: inherit; outline: none; -webkit-appearance: none; }
     input::placeholder { color: #C6C3B8; }
-    input:focus { box-shadow: 0 0 0 4px rgba(37,99,235,.12); }
-    button { transition: transform .15s ease, opacity .15s ease, box-shadow .15s ease; }
     ::-webkit-scrollbar { display: none; }
 
     @keyframes spin    { to { transform: rotate(360deg); } }
@@ -53,12 +50,6 @@
     .tab-btn:active       { opacity: .5; }
     .budget-row:active    { background: var(--surf2) !important; }
     .quick-card:active    { transform: scale(.96); }
-    .home-action:active   { transform: scale(.97); }
-    .app-shell { box-shadow: 0 0 0 1px rgba(24,32,51,.04); }
-    @media (min-width: 700px) {
-      .app-shell { margin-top: 22px !important; margin-bottom: 22px !important; min-height: calc(100vh - 44px) !important; border-radius: 30px; overflow: hidden; box-shadow: 0 24px 70px rgba(31,45,76,.14); }
-      .tab-bar { border-radius: 0 0 30px 30px; }
-    }
 
     #boot { display:flex;justify-content:center;align-items:center;height:100vh; }
     #boot .sp { width:28px;height:28px;border-radius:50%;border:3px solid #DDDAD0;border-top-color:#2F6FED;animation:spin .7s linear infinite; }
@@ -246,7 +237,7 @@ function App() {
   const [syncing,     setSyncing]    = useState(false);
 
   // ── Navigation ──────────────────────────────────────────────
-  const [tab,       setTab]      = useState("home");
+  const [tab,       setTab]      = useState("add");
   const [budgetMo,  setBudgetMo] = useState(curMo());
   const [viewWeekOffset, setViewWeekOffset] = useState(0);
 
@@ -483,10 +474,10 @@ function App() {
 
   // ── Shared style constants ────────────────────────────────────
   const S = {
-    card:  {background:"var(--surf)",borderRadius:22,border:"1.5px solid var(--border)",boxShadow:"0 3px 12px rgba(24,32,51,.025)"},
+    card:  {background:"var(--surf)",borderRadius:20,border:"1.5px solid var(--border)"},
     lbl:   {fontSize:11,fontWeight:700,color:"var(--muted)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:10,display:"block"},
     page:  {padding:"28px 20px 0"},
-    title: {fontSize:28,fontWeight:800,letterSpacing:"-0.9px",color:"var(--text)",marginBottom:4},
+    title: {fontSize:27,fontWeight:800,letterSpacing:"-0.7px",color:"var(--text)",marginBottom:4},
     opt:   {textTransform:"none",letterSpacing:0,fontWeight:400,fontSize:11},
   };
 
@@ -498,7 +489,6 @@ function App() {
 
   if (user === null) return <LoginScreen/>;
 
-
   if (loading) return (
     <div style={{display:"flex",justifyContent:"center",alignItems:"center",height:"100vh"}}>
       <div style={{width:28,height:28,borderRadius:14,border:"3px solid var(--border)",borderTopColor:"var(--p1)",animation:"spin .7s linear infinite"}}/>
@@ -507,7 +497,7 @@ function App() {
 
   // ════════════════════════════════════════════════════════════
   return (
-  <div className="app-shell" style={{background:"var(--bg)",minHeight:"100vh",maxWidth:460,margin:"0 auto",paddingBottom:90}}>
+    <div style={{background:"var(--bg)",minHeight:"100vh",maxWidth:430,margin:"0 auto",paddingBottom:90}}>
 
       {/* Sync bar */}
       {syncing && <div style={{position:"fixed",top:0,left:0,right:0,height:3,background:"var(--p1)",zIndex:9999,animation:"pulse 1.4s ease infinite"}}/>}
@@ -772,65 +762,9 @@ function App() {
         </div>
       )}
 
-     {/* ══════════════════════════════════════════════════════
-         HOME TAB
-     ══════════════════════════════════════════════════════ */}
-     {tab==="home" && (()=>{
-       const month = curMo();
-       const monthExps = moExps(exps,month);
-       const spent = monthExps.reduce((a,e)=>a+e.amt,0);
-       const planned = Object.values(budgets).reduce((a,b)=>a+b,0);
-       const progress = pct(spent,planned);
-       const recent = exps.slice(0,4);
-       const todayLabel = new Date().toLocaleDateString("en-NZ",{weekday:"long",day:"numeric",month:"long"});
-       return <div key="home" className="tab-anim" style={S.page}>
-         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:22}}>
-           <div>
-             <div style={{fontSize:13,fontWeight:700,color:"var(--p1)",letterSpacing:".03em",marginBottom:5}}>{todayLabel}</div>
-             <div style={S.title}>Your money, together.</div>
-             <div style={{fontSize:14,color:"var(--muted)",marginTop:5}}>A calm view of the household.</div>
-           </div>
-           <button onClick={()=>{setDraftNames({p1:names.p1,p2:names.p2});setModal({type:"settings"});}} aria-label="Settings" style={{width:42,height:42,borderRadius:14,background:"var(--surf)",border:"1.5px solid var(--border)",cursor:"pointer",color:"var(--muted)",display:"grid",placeItems:"center",boxShadow:"0 3px 12px rgba(24,32,51,.03)"}}>
-             <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={3}/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-           </button>
-         </div>
-
-         <div style={{background:"linear-gradient(135deg,#1D4ED8 0%,#4F46E5 62%,#7C3AED 100%)",borderRadius:24,padding:"22px 20px",marginBottom:14,color:"#fff",boxShadow:"0 16px 32px rgba(59,76,196,.25)"}}>
-           <div style={{fontSize:12,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",opacity:.72,marginBottom:7}}>{moLabel(month)}</div>
-           <div style={{fontSize:34,fontWeight:800,letterSpacing:"-1.4px",marginBottom:planned?12:4}}>{nzd(spent)}</div>
-           <div style={{fontSize:13,opacity:.8}}>{monthExps.length} purchase{monthExps.length!==1?"s":""} this month{planned?` · ${nzd(planned)} plan`:""}</div>
-           {planned>0 && <><div style={{height:7,background:"rgba(255,255,255,.23)",borderRadius:99,marginTop:18,overflow:"hidden"}}><div style={{height:"100%",width:`${progress}%`,borderRadius:99,background:"#fff"}}/></div><div style={{fontSize:12,fontWeight:700,marginTop:7,opacity:.86}}>{progress}% of your monthly plan used</div></>}
-         </div>
-
-         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-           <button className="home-action" onClick={()=>setTab("add")} style={{textAlign:"left",padding:"16px",background:"var(--surf)",border:"1.5px solid var(--border)",borderRadius:19,cursor:"pointer",boxShadow:"0 3px 12px rgba(24,32,51,.025)"}}>
-             <div style={{width:34,height:34,borderRadius:11,background:"#E7EEFF",color:"var(--p1)",display:"grid",placeItems:"center",fontSize:22,marginBottom:10}}>+</div>
-             <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>Add expense</div>
-             <div style={{fontSize:12,color:"var(--muted)",marginTop:3}}>Log it in seconds</div>
-           </button>
-           <button className="home-action" onClick={()=>{setBudgetMo(month);setTab("budget");}} style={{textAlign:"left",padding:"16px",background:"var(--surf)",border:"1.5px solid var(--border)",borderRadius:19,cursor:"pointer",boxShadow:"0 3px 12px rgba(24,32,51,.025)"}}>
-             <div style={{width:34,height:34,borderRadius:11,background:"#E9E3FF",color:"var(--p2)",display:"grid",placeItems:"center",fontSize:18,marginBottom:10}}>↗</div>
-             <div style={{fontSize:15,fontWeight:800,color:"var(--text)"}}>See budget</div>
-             <div style={{fontSize:12,color:"var(--muted)",marginTop:3}}>Plan the month</div>
-           </button>
-         </div>
-
-         {recurringItems.length>0 && <button onClick={()=>{setTab("add");setShowRecurring(true);}} style={{width:"100%",display:"flex",alignItems:"center",gap:12,textAlign:"left",padding:"14px 16px",marginBottom:14,background:"#EEF3FF",border:"1.5px solid #D8E4FF",borderRadius:18,cursor:"pointer",color:"var(--text)"}}>
-           <div style={{width:36,height:36,borderRadius:11,background:"#DCE8FF",display:"grid",placeItems:"center",color:"var(--p1)",fontSize:18}}>↻</div>
-           <div style={{flex:1}}><div style={{fontSize:14,fontWeight:800}}>Quick add recurring</div><div style={{fontSize:12,color:"var(--muted)",marginTop:2}}>{recurringItems.length} regular expense{recurringItems.length!==1?"s":""} ready to log</div></div>
-           <div style={{fontSize:20,color:"var(--p1)"}}>›</div>
-         </button>}
-
-         <div style={{...S.card,overflow:"hidden",marginBottom:14}}>
-           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 16px 12px"}}><div style={{fontSize:14,fontWeight:800}}>Recent activity</div><button onClick={()=>{setViewWeekOffset(0);setTab("week");}} style={{background:"none",border:"none",color:"var(--p1)",fontSize:12,fontWeight:800,cursor:"pointer"}}>View week</button></div>
-           {recent.length===0 ? <div style={{padding:"16px",color:"var(--muted)",fontSize:13}}>Your first expense will appear here.</div> : recent.map(exp=>{const c=catById(exp.category||"other");return <button key={exp.id} onClick={()=>{setViewWeekOffset(Math.round((new Date(exp.week).getTime()-new Date(thisW).getTime())/(7*86400000)));setTab("week");}} style={{width:"100%",display:"flex",alignItems:"center",gap:11,padding:"12px 16px",background:"none",border:"none",borderTop:"1px solid var(--border)",cursor:"pointer",textAlign:"left"}}><div style={{width:35,height:35,borderRadius:11,background:`${c.color}20`,display:"grid",placeItems:"center",fontSize:16}}>{c.emoji}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:14,fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{exp.where}</div><div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{shortDate(exp.ts)} · {exp.by==="p1"?names.p1:names.p2}</div></div><div style={{fontSize:15,fontWeight:800}}>{nzd(exp.amt)}</div></button>})}
-         </div>
-       </div>;
-     })()}
-
-     {/* ══════════════════════════════════════════════════════
-         ADD TAB
-     ══════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════════════════════
+          ADD TAB
+      ══════════════════════════════════════════════════════ */}
       {tab==="add" && (
         <div key="add" className="tab-anim" style={S.page}>
 
@@ -999,7 +933,6 @@ function App() {
 
           {/* Submit */}
           <button className="add-btn" onClick={addExp}
-
             style={{width:"100%",background:by?aC:"var(--surf2)",color:by?"#fff":"var(--muted)",border:"none",borderRadius:20,padding:"20px 0",fontSize:18,fontWeight:800,cursor:"pointer",transition:"background .2s,box-shadow .2s",boxShadow:by?`0 8px 32px ${aHex}50`:"none",marginBottom:8}}>
             Add expense
           </button>
@@ -1452,10 +1385,8 @@ function App() {
       {/* ══════════════════════════════════════════════════════
           TAB BAR
       ══════════════════════════════════════════════════════ */}
-      <div className="tab-bar" style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:460,background:"rgba(255,255,255,.96)",backdropFilter:"blur(16px)",borderTop:"1px solid var(--border)",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:"var(--surf)",borderTop:"1px solid var(--border)",display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
         {[
-          ["home",   "Home",
-            <svg key="h" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.3} strokeLinecap="round" strokeLinejoin="round"><path d="M3 10.8 12 3l9 7.8v9.7a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20.5z"/><path d="M9 22v-7h6v7"/></svg>],
           ["add",    "Add",
             <svg key="a" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><circle cx={12} cy={12} r={9}/><line x1={12} y1={8} x2={12} y2={16}/><line x1={8} y1={12} x2={16} y2={12}/></svg>],
           ["week",   "Week",
@@ -1464,7 +1395,7 @@ function App() {
             <svg key="b" width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><line x1={18} y1={20} x2={18} y2={10}/><line x1={12} y1={20} x2={12} y2={4}/><line x1={6} y1={20} x2={6} y2={14}/></svg>],
         ].map(([t,label,icon])=>(
           <button key={t} className="tab-btn" onClick={()=>setTab(t)}
-            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:tab===t?"var(--p1)":"var(--muted)",fontSize:11,fontWeight:tab===t?800:500}}>
+            style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0",background:"none",border:"none",cursor:"pointer",color:tab===t?"var(--p1)":"var(--muted)",fontSize:11,fontWeight:tab===t?700:400}}>
             {icon}{label}
           </button>
         ))}

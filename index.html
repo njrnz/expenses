@@ -710,6 +710,19 @@
           transition: none !important;
         }
       }
+      html, body { max-width:100%; overflow-x:clip; overscroll-behavior-x:none; }
+      .shell > *, .columns > *, .metrics > *, .fields > *, .toolbar > *, .list-row > * { min-width:0; }
+      input, select, textarea { max-width:100%; }
+      .merchant-control { display:flex; gap:8px; }
+      .merchant-control input { flex:1; width:0; }
+      .merchant-toggle { flex-shrink:0; padding:10px 13px; }
+      .field { position:relative; }
+      .merchant-options { position:absolute; top:100%; left:0; right:0; z-index:3; border:1px solid var(--line); border-radius:12px; margin-top:7px; max-height:230px; overflow-y:auto; background:var(--paper); box-shadow:0 10px 25px #20243318; }
+      .merchant-options[hidden] { display:none; }
+      .merchant-options button { display:block; width:100%; text-align:left; border:0; border-radius:0; padding:12px 13px; overflow-wrap:anywhere; }
+      .merchant-options button:hover, .merchant-options button:focus { background:#eef0ff; }
+      .merchant-options .muted { padding:12px 13px; margin:0; font-size:13px; }
+      @media(max-width:730px) { .money { white-space:normal; overflow-wrap:anywhere; text-align:right; } .metric b { overflow-wrap:anywhere; } }
     </style>
   </head>
   <body>
@@ -1145,11 +1158,11 @@ if (typeof module !== "undefined")
           people(d.by, prefix) +
           '<div class="field"><label for="' +
           prefix +
-          'where">Merchant or description</label><input id="' +
+          'where">Merchant or description</label><div class="merchant-control"><input id="' +
           prefix +
           'where" name="where" value="' +
           esc(d.where) +
-          '" placeholder="PAK’nSAVE, power bill…" list="merchants" maxlength="120"></div>' +
+          '" placeholder="PAK’nSAVE, power bill…" autocomplete="off" maxlength="120" aria-controls="'+prefix+'merchants" aria-expanded="false"><button type="button" class="merchant-toggle" aria-label="Show previous merchants" aria-controls="'+prefix+'merchants" aria-expanded="false">⌄</button></div><div id="'+prefix+'merchants" class="merchant-options" hidden aria-label="Previous merchants"></div></div>' +
           '<fieldset><legend>Category</legend><div class="people category-pills">' +
           CATS.map(
             (c) =>
@@ -1270,6 +1283,23 @@ if (typeof module !== "undefined")
           ),
         ].slice(0, 100);
       }
+      function bindMerchants(form, prefix, suggestCategory=false) {
+        const input=form.elements.where, toggle=form.querySelector('.merchant-toggle'), list=document.getElementById(prefix+'merchants');
+        function close(){list.hidden=true;input.setAttribute('aria-expanded','false');toggle.setAttribute('aria-expanded','false');}
+        function show(all=false){
+          const query=all?'':input.value.trim().toLowerCase();
+          const matches=merchantList().filter(m=>m.toLowerCase().includes(query)).slice(0,12);
+          list.innerHTML=matches.length?matches.map(m=>'<button type="button">'+esc(m)+'</button>').join(''):'<p class="muted">'+(merchantList().length?'No matches — type a new merchant.':'Your saved merchants will appear here.')+'</p>';
+          list.hidden=false;input.setAttribute('aria-expanded','true');toggle.setAttribute('aria-expanded','true');
+          list.querySelectorAll('button').forEach((button,i)=>button.onclick=()=>{input.value=matches[i];if(suggestCategory){const old=exps().find(e=>e.where.toLowerCase()===matches[i].toLowerCase());if(old)form.querySelector('[name="category"][value="'+old.category+'"]').checked=true;}input.dispatchEvent(new Event('input',{bubbles:true}));close();input.focus();close();});
+        }
+        input.addEventListener('focus',()=>show());
+        input.addEventListener('input',()=>show());
+        toggle.onclick=()=>list.hidden?show(true):close();
+        input.addEventListener('keydown',e=>{if(e.key==='Escape'){close();e.stopPropagation();}if(e.key==='ArrowDown'){e.preventDefault();if(list.hidden)show();list.querySelector('button')?.focus();}});
+        list.addEventListener('keydown',e=>{const buttons=[...list.querySelectorAll('button')],i=buttons.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();buttons[(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}if(e.key==='Escape'){e.stopPropagation();input.focus();close();}});
+        form.addEventListener('focusout',e=>{if(!e.relatedTarget || (!list.contains(e.relatedTarget)&&e.relatedTarget!==input&&e.relatedTarget!==toggle))close();});
+      }
       function render() {
         if (!state.user) {
           renderLogin();
@@ -1371,6 +1401,7 @@ if (typeof module !== "undefined")
             : '<p class="notice">Choose Weekly, Fortnightly or Monthly under More details to create a shortcut.</p>') +
           "</section></aside></div>";
         const form = document.getElementById("add-form");
+        bindMerchants(form,'add-',true);
         form.oninput = () => rememberDraft(form);
         form.querySelector('[name="where"]').onchange = () => {
           const old = exps().find(
@@ -1455,6 +1486,7 @@ if (typeof module !== "undefined")
             '<div class="form-actions"><button type="button" class="danger" id="delete-entry">Delete</button><button type="submit" class="primary">Save changes</button></div></form>',
           () => {
             const form = document.getElementById("edit-form");
+            bindMerchants(form,'edit-');
             form.onsubmit = (e) => {
               e.preventDefault();
               runSave(

@@ -116,6 +116,12 @@
         justify-content: space-between;
         align-items: center;
         margin-bottom: 28px;
+        position: sticky;
+        top: 0;
+        z-index: 9;
+        background: rgba(245, 245, 248, 0.97);
+        backdrop-filter: blur(12px);
+        padding: 12px 0;
       }
       .top-right {
         display: flex;
@@ -124,7 +130,14 @@
       }
       .status {
         font-size: 12px;
-        color: var(--muted);
+        color: #4f5668;
+        font-weight: 650;
+      }
+      #settings {
+        min-height: 44px;
+        min-width: 96px;
+        border-color: #cfd3df;
+        box-shadow: 0 3px 12px #2024330c;
       }
       .shell {
         display: grid;
@@ -359,13 +372,27 @@
         font-size: 13px;
       }
       .hero {
-        background: linear-gradient(120deg, #303da3, #6c48d7);
+        background: linear-gradient(120deg, #17213a, #3347a8);
         color: #fff;
         border: 0;
       }
       .hero .eyebrow,
       .hero .muted {
-        color: #e0e2ff;
+        color: #f1f3ff;
+      }
+      .quick-recurring {
+        margin-bottom: 18px;
+        padding: 13px;
+        background: #f3f4fb;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+      }
+      .quick-recurring label {
+        margin-bottom: 7px;
+      }
+      .quick-recurring select {
+        background: #fff;
+        min-height: 44px;
       }
       .hero .large {
         font-size: 38px;
@@ -618,7 +645,9 @@
           padding: 18px 16px 95px;
         }
         .top {
-          margin-bottom: 22px;
+          margin: -18px -16px 18px;
+          padding: calc(10px + env(safe-area-inset-top)) 16px 10px;
+          border-bottom: 1px solid var(--line);
         }
         .shell {
           display: block;
@@ -659,6 +688,22 @@
         }
         .top-right {
           gap: 8px;
+        }
+        .status {
+          display: none;
+        }
+        #settings {
+          min-width: 92px;
+          font-size: 14px;
+        }
+        .fields {
+          grid-template-columns: 1fr;
+          gap: 11px;
+        }
+        details .fields input,
+        details .fields select {
+          min-height: 46px;
+          font-size: 16px;
         }
         .metrics.three {
           grid-template-columns: 1fr 1fr;
@@ -710,19 +755,85 @@
           transition: none !important;
         }
       }
-      html, body { max-width:100%; overflow-x:clip; overscroll-behavior-x:none; }
-      .shell > *, .columns > *, .metrics > *, .fields > *, .toolbar > *, .list-row > * { min-width:0; }
-      input, select, textarea { max-width:100%; }
-      .merchant-control { display:flex; gap:8px; }
-      .merchant-control input { flex:1; width:0; }
-      .merchant-toggle { flex-shrink:0; padding:10px 13px; }
-      .field { position:relative; }
-      .merchant-options { position:absolute; top:100%; left:0; right:0; z-index:3; border:1px solid var(--line); border-radius:12px; margin-top:7px; max-height:230px; overflow-y:auto; background:var(--paper); box-shadow:0 10px 25px #20243318; }
-      .merchant-options[hidden] { display:none; }
-      .merchant-options button { display:block; width:100%; text-align:left; border:0; border-radius:0; padding:12px 13px; overflow-wrap:anywhere; }
-      .merchant-options button:hover, .merchant-options button:focus { background:#eef0ff; }
-      .merchant-options .muted { padding:12px 13px; margin:0; font-size:13px; }
-      @media(max-width:730px) { .money { white-space:normal; overflow-wrap:anywhere; text-align:right; } .metric b { overflow-wrap:anywhere; } }
+      html,
+      body {
+        max-width: 100%;
+        overflow-x: clip;
+        overscroll-behavior-x: none;
+      }
+      .shell > *,
+      .columns > *,
+      .metrics > *,
+      .fields > *,
+      .toolbar > *,
+      .list-row > * {
+        min-width: 0;
+      }
+      input,
+      select,
+      textarea {
+        max-width: 100%;
+      }
+      .merchant-control {
+        display: flex;
+        gap: 8px;
+      }
+      .merchant-control input {
+        flex: 1;
+        width: 0;
+      }
+      .merchant-toggle {
+        flex-shrink: 0;
+        padding: 10px 13px;
+      }
+      .field {
+        position: relative;
+      }
+      .merchant-options {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        z-index: 3;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        margin-top: 7px;
+        max-height: 230px;
+        overflow-y: auto;
+        background: var(--paper);
+        box-shadow: 0 10px 25px #20243318;
+      }
+      .merchant-options[hidden] {
+        display: none;
+      }
+      .merchant-options button {
+        display: block;
+        width: 100%;
+        text-align: left;
+        border: 0;
+        border-radius: 0;
+        padding: 12px 13px;
+        overflow-wrap: anywhere;
+      }
+      .merchant-options button:hover,
+      .merchant-options button:focus {
+        background: #eef0ff;
+      }
+      .merchant-options .muted {
+        padding: 12px 13px;
+        margin: 0;
+        font-size: 13px;
+      }
+      @media (max-width: 730px) {
+        .money {
+          white-space: normal;
+          overflow-wrap: anywhere;
+          text-align: right;
+        }
+        .metric b {
+          overflow-wrap: anywhere;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1032,7 +1143,12 @@ if (typeof module !== "undefined")
         monthly: "Monthly",
       };
       function id() {
-        return "r_" + [...crypto.getRandomValues(new Uint8Array(16))].map(n=>n.toString(16).padStart(2,"0")).join("");
+        return (
+          "r_" +
+          [...crypto.getRandomValues(new Uint8Array(16))]
+            .map((n) => n.toString(16).padStart(2, "0"))
+            .join("")
+        );
       }
       function snapshot(r) {
         return r ? structuredClone(r._raw) : null;
@@ -1075,7 +1191,10 @@ if (typeof module !== "undefined")
         form.querySelectorAll("button").forEach((b) => (b.disabled = true));
         updateStatus();
         try {
-          if (!state.ready || !connected) throw new Error("Not connected. Your draft is kept — reconnect and try again.");
+          if (!state.ready || !connected)
+            throw new Error(
+              "Not connected. Your draft is kept — reconnect and try again.",
+            );
           await task();
           state.saving = false;
           done();
@@ -1162,7 +1281,13 @@ if (typeof module !== "undefined")
           prefix +
           'where" name="where" value="' +
           esc(d.where) +
-          '" placeholder="PAK’nSAVE, power bill…" autocomplete="off" maxlength="120" aria-controls="'+prefix+'merchants" aria-expanded="false"><button type="button" class="merchant-toggle" aria-label="Show previous merchants" aria-controls="'+prefix+'merchants" aria-expanded="false">⌄</button></div><div id="'+prefix+'merchants" class="merchant-options" hidden aria-label="Previous merchants"></div></div>' +
+          '" placeholder="PAK’nSAVE, power bill…" autocomplete="off" maxlength="120" aria-controls="' +
+          prefix +
+          'merchants" aria-expanded="false"><button type="button" class="merchant-toggle" aria-label="Show previous merchants" aria-controls="' +
+          prefix +
+          'merchants" aria-expanded="false">⌄</button></div><div id="' +
+          prefix +
+          'merchants" class="merchant-options" hidden aria-label="Previous merchants"></div></div>' +
           '<fieldset><legend>Category</legend><div class="people category-pills">' +
           CATS.map(
             (c) =>
@@ -1283,22 +1408,91 @@ if (typeof module !== "undefined")
           ),
         ].slice(0, 100);
       }
-      function bindMerchants(form, prefix, suggestCategory=false) {
-        const input=form.elements.where, toggle=form.querySelector('.merchant-toggle'), list=document.getElementById(prefix+'merchants');
-        function close(){list.hidden=true;input.setAttribute('aria-expanded','false');toggle.setAttribute('aria-expanded','false');}
-        function show(all=false){
-          const query=all?'':input.value.trim().toLowerCase();
-          const matches=merchantList().filter(m=>m.toLowerCase().includes(query)).slice(0,12);
-          list.innerHTML=matches.length?matches.map(m=>'<button type="button">'+esc(m)+'</button>').join(''):'<p class="muted">'+(merchantList().length?'No matches — type a new merchant.':'Your saved merchants will appear here.')+'</p>';
-          list.hidden=false;input.setAttribute('aria-expanded','true');toggle.setAttribute('aria-expanded','true');
-          list.querySelectorAll('button').forEach((button,i)=>button.onclick=()=>{input.value=matches[i];if(suggestCategory){const old=exps().find(e=>e.where.toLowerCase()===matches[i].toLowerCase());if(old)form.querySelector('[name="category"][value="'+old.category+'"]').checked=true;}input.dispatchEvent(new Event('input',{bubbles:true}));close();input.focus();close();});
+      function bindMerchants(form, prefix, suggestCategory = false) {
+        const input = form.elements.where,
+          toggle = form.querySelector(".merchant-toggle"),
+          list = document.getElementById(prefix + "merchants");
+        function close() {
+          list.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+          toggle.setAttribute("aria-expanded", "false");
         }
-        input.addEventListener('focus',()=>show());
-        input.addEventListener('input',()=>show());
-        toggle.onclick=()=>list.hidden?show(true):close();
-        input.addEventListener('keydown',e=>{if(e.key==='Escape'){close();e.stopPropagation();}if(e.key==='ArrowDown'){e.preventDefault();if(list.hidden)show();list.querySelector('button')?.focus();}});
-        list.addEventListener('keydown',e=>{const buttons=[...list.querySelectorAll('button')],i=buttons.indexOf(document.activeElement);if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();buttons[(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}if(e.key==='Escape'){e.stopPropagation();input.focus();close();}});
-        form.addEventListener('focusout',e=>{if(!e.relatedTarget || (!list.contains(e.relatedTarget)&&e.relatedTarget!==input&&e.relatedTarget!==toggle))close();});
+        function show(all = false) {
+          const query = all ? "" : input.value.trim().toLowerCase();
+          const matches = merchantList()
+            .filter((m) => m.toLowerCase().includes(query))
+            .slice(0, 12);
+          list.innerHTML = matches.length
+            ? matches
+                .map((m) => '<button type="button">' + esc(m) + "</button>")
+                .join("")
+            : '<p class="muted">' +
+              (merchantList().length
+                ? "No matches — type a new merchant."
+                : "Your saved merchants will appear here.") +
+              "</p>";
+          list.hidden = false;
+          input.setAttribute("aria-expanded", "true");
+          toggle.setAttribute("aria-expanded", "true");
+          list.querySelectorAll("button").forEach(
+            (button, i) =>
+              (button.onclick = () => {
+                input.value = matches[i];
+                if (suggestCategory) {
+                  const old = exps().find(
+                    (e) => e.where.toLowerCase() === matches[i].toLowerCase(),
+                  );
+                  if (old)
+                    form.querySelector(
+                      '[name="category"][value="' + old.category + '"]',
+                    ).checked = true;
+                }
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                close();
+                input.focus();
+                close();
+              }),
+          );
+        }
+        input.addEventListener("focus", () => show());
+        input.addEventListener("input", () => show());
+        toggle.onclick = () => (list.hidden ? show(true) : close());
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            close();
+            e.stopPropagation();
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            if (list.hidden) show();
+            list.querySelector("button")?.focus();
+          }
+        });
+        list.addEventListener("keydown", (e) => {
+          const buttons = [...list.querySelectorAll("button")],
+            i = buttons.indexOf(document.activeElement);
+          if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            buttons[
+              (i + (e.key === "ArrowDown" ? 1 : -1) + buttons.length) %
+                buttons.length
+            ]?.focus();
+          }
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            input.focus();
+            close();
+          }
+        });
+        form.addEventListener("focusout", (e) => {
+          if (
+            !e.relatedTarget ||
+            (!list.contains(e.relatedTarget) &&
+              e.relatedTarget !== input &&
+              e.relatedTarget !== toggle)
+          )
+            close();
+        });
       }
       function render() {
         if (!state.user) {
@@ -1341,7 +1535,7 @@ if (typeof module !== "undefined")
                 "</button>",
             )
             .join("") +
-          '<small>NZD · Thursday weeks<br>Household 3.0</small></nav><main id="main"></main></div></div><datalist id="merchants">' +
+          '<small>NZD · Thursday weeks<br>Household 3.1</small></nav><main id="main"></main></div></div><datalist id="merchants">' +
           merchantList()
             .map((x) => '<option value="' + esc(x) + '"></option>')
             .join("") +
@@ -1364,8 +1558,27 @@ if (typeof module !== "undefined")
         const balance = balanceOf(exps(), settles()),
           regulars = recurringItems();
         document.getElementById("main").innerHTML =
-          '<div class="page-head"><div><h1>New expense</h1><p class="muted intro">A quick record. A clearer picture.</p></div></div><div class="columns"><section class="card"><form id="add-form">' +
+          '<div class="page-head"><div><h1>New expense</h1></div></div><div class="columns"><section class="card"><form id="add-form">' +
           errorBox +
+          (regulars.length
+            ? '<div class="quick-recurring"><label for="quick-recurring">Quick add recurring</label><select id="quick-recurring"><option value="">Choose an expense…</option>' +
+              regulars
+                .slice(0, 30)
+                .map(
+                  (e) =>
+                    '<option value="' +
+                    esc(e._key) +
+                    '">' +
+                    esc(e.where) +
+                    " · " +
+                    money(e.cents) +
+                    " · " +
+                    esc(name(e.by)) +
+                    "</option>",
+                )
+                .join("") +
+              "</select></div>"
+            : "") +
           expenseFields(state.draft, "add-") +
           '<div class="sticky-save"><button type="submit" class="primary wide entry-submit">Save expense</button></div></form></section><aside><section class="card"><div class="eyebrow">Running balance</div><h2>' +
           esc(
@@ -1377,31 +1590,9 @@ if (typeof module !== "undefined")
           ) +
           '</h2><div class="split"><b style="font-size:26px">' +
           money(Math.abs(balance)) +
-          '</b><button id="record-payment">Record payment</button></div><p class="footer-note">All shared purchases, less recorded payments. Housing excluded.</p><button class="inline-link" id="all-payments">Payment history</button></section><section class="card"><h2>Quick add recurring</h2><p class="muted small">Start with a regular purchase.</p>' +
-          (regulars.length
-            ? regulars
-                .slice(0, 8)
-                .map(
-                  (e) =>
-                    '<button class="list-row" data-quick="' +
-                    esc(e._key) +
-                    '"><span class="icon">' +
-                    categoryOf(e.category).icon +
-                    '</span><span class="grow"><b>' +
-                    esc(e.where) +
-                    '</b><span class="small muted">' +
-                    esc(name(e.by)) +
-                    " · " +
-                    freqLabel[e.frequency] +
-                    '</span></span><span class="money">' +
-                    money(e.cents) +
-                    "</span></button>",
-                )
-                .join("")
-            : '<p class="notice">Choose Weekly, Fortnightly or Monthly under More details to create a shortcut.</p>') +
-          "</section></aside></div>";
+          '</b><button id="record-payment">Record payment</button></div><p class="footer-note">All shared purchases, less recorded payments. Housing excluded.</p><button class="inline-link" id="all-payments">Payment history</button></section></aside></div>';
         const form = document.getElementById("add-form");
-        bindMerchants(form,'add-',true);
+        bindMerchants(form, "add-", true);
         form.oninput = () => rememberDraft(form);
         form.querySelector('[name="where"]').onchange = () => {
           const old = exps().find(
@@ -1449,23 +1640,23 @@ if (typeof module !== "undefined")
             },
           );
         };
-        document.querySelectorAll("[data-quick]").forEach(
-          (b) =>
-            (b.onclick = () => {
-              const r = regulars.find((e) => e._key === b.dataset.quick);
-              state.draft = {
-                ...blankExpense(),
-                by: r.by,
-                amt: (r.cents / 100).toFixed(2),
-                where: r.where === "Unspecified" ? "" : r.where,
-                category: r.category,
-                note: r.note || "",
-                frequency: r.frequency,
-              };
-              renderAdd();
-              document.querySelector("#add-amount").focus();
-            }),
-        );
+        const quick = document.getElementById("quick-recurring");
+        if (quick)
+          quick.onchange = () => {
+            const r = regulars.find((e) => e._key === quick.value);
+            if (!r) return;
+            state.draft = {
+              ...blankExpense(),
+              by: r.by,
+              amt: (r.cents / 100).toFixed(2),
+              where: r.where === "Unspecified" ? "" : r.where,
+              category: r.category,
+              note: r.note || "",
+              frequency: r.frequency,
+            };
+            renderAdd();
+            document.querySelector("#add-amount").focus();
+          };
         document.getElementById("record-payment").onclick = () =>
           paymentModal();
         document.getElementById("all-payments").onclick = () =>
@@ -1486,7 +1677,7 @@ if (typeof module !== "undefined")
             '<div class="form-actions"><button type="button" class="danger" id="delete-entry">Delete</button><button type="submit" class="primary">Save changes</button></div></form>',
           () => {
             const form = document.getElementById("edit-form");
-            bindMerchants(form,'edit-');
+            bindMerchants(form, "edit-");
             form.onsubmit = (e) => {
               e.preventDefault();
               runSave(
@@ -2472,7 +2663,7 @@ if (typeof module !== "undefined")
               .join("") +
             '</div><button class="primary wide" type="submit">Save names</button></form><div class="list-row"><button id="csv">Export CSV</button><button id="backup">Full JSON backup</button></div><p class="footer-note">JSON includes income history, targets, payments and all original records.</p><p class="notice">Use this version on both devices. Older versions save whole collections and can overwrite newer entries.</p><div class="list-row"><span class="grow small muted">' +
             esc(state.user.email || "") +
-            '</span><button id="signout">Sign out</button></div><p class="version">Household 3.0 · NZ dates · record-level saves</p>',
+            '</span><button id="signout">Sign out</button></div><p class="version">Household 3.1 · NZ dates · record-level saves</p>',
           () => {
             const form = document.getElementById("names-form");
             form.onsubmit = (e) => {
@@ -2518,7 +2709,7 @@ if (typeof module !== "undefined")
         root.innerHTML =
           '<div class="wrap"><section class="card login"><div class="brand">house<span>hold</span></div><h1>Welcome back</h1><p class="muted">Your shared expenses, in one place.</p><form id="login-form">' +
           errorBox +
-          '<div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><button class="primary wide" type="submit">Sign in</button></form><p class="footer-note">Household 3.0 · Same account and existing records.</p></section></div>';
+          '<div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required></div><div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div><button class="primary wide" type="submit">Sign in</button></form><p class="footer-note">Household 3.1 · Same account and existing records.</p></section></div>';
         const form = document.getElementById("login-form");
         form.onsubmit = async (e) => {
           e.preventDefault();

@@ -1434,25 +1434,38 @@ if (typeof module !== "undefined")
           list.hidden = false;
           input.setAttribute("aria-expanded", "true");
           toggle.setAttribute("aria-expanded", "true");
-          list.querySelectorAll("button").forEach(
-            (button, i) =>
-              (button.onclick = () => {
-                input.value = matches[i];
-                if (suggestCategory) {
-                  const old = exps().find(
-                    (e) => e.where.toLowerCase() === matches[i].toLowerCase(),
-                  );
-                  if (old)
-                    form.querySelector(
-                      '[name="category"][value="' + old.category + '"]',
-                    ).checked = true;
-                }
-                input.dispatchEvent(new Event("input", { bubbles: true }));
-                close();
-                input.focus();
-                close();
-              }),
-          );
+          list.querySelectorAll("button").forEach((button, i) => {
+            // On a phone, tapping a suggestion first blurs the text field. That
+            // used to close and replace this list before its click handler ran.
+            // Choose on pointer-down instead, while the list is still present.
+            const choose = () => {
+              input.value = matches[i];
+              if (suggestCategory) {
+                const old = exps().find(
+                  (e) => e.where.toLowerCase() === matches[i].toLowerCase(),
+                );
+                if (old)
+                  form.querySelector(
+                    '[name="category"][value="' + old.category + '"]',
+                  ).checked = true;
+              }
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              close();
+              input.focus({ preventScroll: true });
+              close();
+            };
+            button.addEventListener("pointerdown", (event) => {
+              event.preventDefault();
+              button.dataset.picked = "true";
+              choose();
+            });
+            // Retain keyboard activation and support browsers without Pointer Events.
+            button.addEventListener("click", (event) => {
+              event.preventDefault();
+              if (button.dataset.picked === "true") return;
+              choose();
+            });
+          });
         }
         input.addEventListener("focus", () => show());
         input.addEventListener("input", () => show());
